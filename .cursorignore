@@ -1,0 +1,37 @@
+# .cursorignore
+# Controls Cursor indexing/search context. Goal: reduce noise, control cost, and avoid accidental context bloat.
+
+# --- Dependencies / build outputs ---
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+
+# --- Python caches / envs ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+ruff_cache/
+
+# --- Secrets / env files ---
+.env
+.env.*
+
+# --- Logs & run artifacts (excluded from indexing by default) ---
+logs/
+
+# --- One-off scripts (excluded by default; include explicitly when needed) ---
+temp_scripts/
+
+# --- OS / editor noise ---
+.DS_Store
+.vscode/
+.idea/

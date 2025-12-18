@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Briefcase">
+  <rect width="64" height="64" rx="14" fill="#0f172a"/>
+  <path
+    d="M20 22c0-2.2 1.8-4 4-4h16c2.2 0 4 1.8 4 4v4h4c2.2 0 4 1.8 4 4v14c0 4.4-3.6 8-8 8H16c-4.4 0-8-3.6-8-8V34c0-2.2 1.8-4 4-4h4v-4zm4 0v4h16v-4H24zm-8 12v14c0 0.6 0.4 1 1 1h30c0.6 0 1-0.4 1-1V34c0-0.6-0.4-1-1-1H17c-0.6 0-1 0.4-1 1z"
+    fill="#e2e8f0"
+  />
+  <path d="M30 36h4v4h-4z" fill="#38bdf8"/>
+</svg>
+

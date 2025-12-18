@@ -1,0 +1,8 @@
+@import "tailwindcss";
+@layer base {
+    button,
+    a,
+    [role="button"] {
+        cursor: pointer;
+    }
+}

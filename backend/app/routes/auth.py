@@ -1,0 +1,337 @@
+# app/routes/auth.py
+from __future__ import annotations
+
+import hmac
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.core.database import get_db
+from app.core.security import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_email_verification_token,
+    verify_token_purpose,
+)
+from app.models.user import User
+from app.models.refresh_token import RefreshToken
+from app.schemas.auth import (
+    RegisterIn,
+    LoginIn,
+    TokenOut,
+    MessageOut,
+    ResendVerifyIn,
+    VerifyOut,
+)
+from app.services.email import EmailDeliveryError, EmailNotConfiguredError, send_email
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+# -----------------------------
+# Refresh token settings
+# -----------------------------
+def _refresh_token_expiry() -> datetime:
+    hours = int(getattr(settings, "REFRESH_TOKEN_EXPIRE_HOURS", 24))
+    return datetime.now(timezone.utc) + timedelta(hours=hours)
+
+
+def _refresh_cookie_max_age_seconds() -> int:
+    hours = int(getattr(settings, "REFRESH_TOKEN_EXPIRE_HOURS", 24))
+    return hours * 3600
+
+
+def _hash_refresh_token(raw_token: str) -> str:
+    """
+    Store only a hash in DB.
+    Use HMAC keyed by JWT_SECRET so DB leaks can't be brute-forced easily.
+    """
+    secret = (settings.JWT_SECRET or "").encode("utf-8")
+    if not secret:
+        raise RuntimeError("JWT_SECRET must be set to hash refresh tokens.")
+    return hmac.new(secret, raw_token.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _issue_refresh_token(db: Session, user_id: int) -> str:
+    """
+    Creates a new refresh token for user, stores hash in DB, returns raw token.
+    """
+    raw = secrets.token_urlsafe(48)  # long random string
+    token_hash = _hash_refresh_token(raw)
+
+    rt = RefreshToken(
+        user_id=user_id,
+        token_hash=token_hash,
+        expires_at=_refresh_token_expiry(),
+        revoked_at=None,
+    )
+    db.add(rt)
+    db.commit()
+
+    return raw
+
+
+def _revoke_refresh_token(db: Session, token_hash: str) -> None:
+    rt = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
+    if not rt:
+        return
+    if rt.revoked_at is None:
+        rt.revoked_at = datetime.now(timezone.utc)
+        db.commit()
+
+
+def _get_valid_refresh_token(db: Session, raw_refresh_token: str) -> RefreshToken | None:
+    token_hash = _hash_refresh_token(raw_refresh_token)
+    rt = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
+    if not rt:
+        return None
+
+    now = datetime.now(timezone.utc)
+    if rt.revoked_at is not None:
+        return None
+    if rt.expires_at <= now:
+        return None
+
+    return rt
+
+
+# -----------------------------
+# Cookie helpers
+# -----------------------------
+def _cookie_name() -> str:
+    return str(getattr(settings, "REFRESH_COOKIE_NAME", "refresh_token")).strip() or "refresh_token"
+
+
+def _cookie_path() -> str:
+    # Keep refresh cookie scoped to auth endpoints by default
+    return str(getattr(settings, "REFRESH_COOKIE_PATH", "/auth")).strip() or "/auth"
+
+
+def _cookie_secure() -> bool:
+    # Prod => HTTPS => Secure cookies. Dev http://localhost => must be False.
+    return settings.is_prod
+
+
+def _cookie_samesite() -> str:
+    """
+    "lax" for same-site dev
+    "none" ONLY if you truly need cross-site cookies (requires HTTPS + Secure=True)
+    """
+    v = str(getattr(settings, "REFRESH_COOKIE_SAMESITE", "lax")).lower().strip()
+    if v not in {"lax", "strict", "none"}:
+        return "lax"
+    return v
+
+
+def _set_refresh_cookie(resp: Response, raw_refresh_token: str) -> None:
+    resp.set_cookie(
+        key=_cookie_name(),
+        value=raw_refresh_token,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite=_cookie_samesite(),
+        max_age=_refresh_cookie_max_age_seconds(),
+        path=_cookie_path(),
+    )
+
+
+def _clear_refresh_cookie(resp: Response) -> None:
+    resp.delete_cookie(
+        key=_cookie_name(),
+        path=_cookie_path(),
+    )
+
+
+def _read_refresh_cookie(req: Request) -> str | None:
+    val = req.cookies.get(_cookie_name())
+    if not val:
+        return None
+    val = val.strip()
+    return val or None
+
+
+# -----------------------------
+# Email verification sender
+# -----------------------------
+def send_verification_email(email: str, token: str) -> None:
+    # Send users to the frontend route which calls the backend /auth/verify endpoint.
+    verify_link = f"{settings.FRONTEND_BASE_URL}/verify?token={token}&email={email}"
+    subject = "Verify your Job Tracker email"
+    body = "\n".join(
+        [
+            "Welcome to Job Tracker!",
+            "",
+            "Please verify your email by clicking the link below:",
+            verify_link,
+            "",
+            "If you did not create this account, you can ignore this email.",
+        ]
+    )
+
+    try:
+        msg_id = send_email(to_email=email, subject=subject, body=body)
+    except EmailNotConfiguredError as e:
+        # Explicit and safe: tells dev what to configure.
+        raise HTTPException(status_code=500, detail=f"Email delivery not configured: {e}")
+    except EmailDeliveryError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    # Log something visible in dev logs without leaking the token/link.
+    print(f"[email] verification email queued to={email} provider={settings.EMAIL_PROVIDER} msg_id={msg_id}")
+
+
+# -----------------------------
+# Routes
+# -----------------------------
+@router.post("/register", response_model=MessageOut)
+def register(payload: RegisterIn, db: Session = Depends(get_db)):
+    email = payload.email.strip().lower()
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    existing = db.query(User).filter(User.email == email).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    user = User(
+        email=email,
+        name=name,
+        password_hash=hash_password(payload.password),
+        is_active=True,
+        is_email_verified=False,
+        email_verified_at=None,
+    )
+    db.add(user)
+    # Only commit user after verification email send succeeds.
+    db.flush()
+    try:
+        token = create_email_verification_token(email=email)
+        send_verification_email(email, token)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return {"message": "Registration successful. Please verify your email."}
+
+
+@router.get("/verify", response_model=VerifyOut)
+def verify_email(token: str, db: Session = Depends(get_db)):
+    try:
+        payload = verify_token_purpose(token, expected_purpose="email_verification")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    email = (payload.get("sub") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Invalid token payload")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="User is inactive")
+
+    if user.is_email_verified:
+        return {"message": "Email already verified"}
+
+    user.is_email_verified = True
+    user.email_verified_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {"message": "Email verified successfully. You can now log in."}
+
+
+@router.post("/resend-verification", response_model=MessageOut)
+def resend_verification(payload: ResendVerifyIn, db: Session = Depends(get_db)):
+    email = payload.email.strip().lower()
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        return {"message": "If that email exists, a verification link was sent."}
+
+    if not user.is_active:
+        return {"message": "If that email exists, a verification link was sent."}
+
+    if user.is_email_verified:
+        return {"message": "Email already verified. Please log in."}
+
+    token = create_email_verification_token(email=email)
+    send_verification_email(email, token)
+
+    return {"message": "If that email exists, a verification link was sent."}
+
+
+@router.post("/login", response_model=TokenOut)
+def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
+    email = payload.email.strip().lower()
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if not user.is_email_verified:
+        raise HTTPException(status_code=403, detail="Email not verified")
+
+    access_token = create_access_token(subject=email)
+
+    # Issue refresh token + set HttpOnly cookie
+    refresh_token = _issue_refresh_token(db, user_id=user.id)
+    _set_refresh_cookie(response, refresh_token)
+
+    # TokenOut returns access token only
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/refresh", response_model=TokenOut)
+def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
+    """
+    Rotate refresh tokens via HttpOnly cookie:
+      - read refresh token from cookie
+      - validate
+      - revoke old
+      - issue new refresh cookie
+      - return new access token
+    """
+    raw = _read_refresh_cookie(request)
+    if not raw:
+        raise HTTPException(status_code=401, detail="Missing refresh token")
+
+    rt = _get_valid_refresh_token(db, raw)
+    if not rt:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+
+    user = db.query(User).filter(User.id == rt.user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    # rotate
+    _revoke_refresh_token(db, rt.token_hash)
+    new_refresh_token = _issue_refresh_token(db, user_id=user.id)
+    _set_refresh_cookie(response, new_refresh_token)
+
+    access_token = create_access_token(subject=user.email)
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/logout", response_model=MessageOut)
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    """
+    Logout by revoking the refresh token in cookie (if present) and clearing cookie.
+    """
+    raw = _read_refresh_cookie(request)
+    if raw:
+        token_hash = _hash_refresh_token(raw)
+        _revoke_refresh_token(db, token_hash)
+
+    _clear_refresh_cookie(response)
+    return {"message": "Logged out"}
