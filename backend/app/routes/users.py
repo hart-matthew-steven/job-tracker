@@ -11,7 +11,7 @@ from app.dependencies.auth import get_current_user
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
 from app.schemas.auth import MessageOut
-from app.schemas.user import ChangePasswordIn, UpdateSettingsIn, UserMeOut
+from app.schemas.user import ChangePasswordIn, UpdateSettingsIn, UserMeOut, UserSettingsOut
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -21,9 +21,8 @@ def get_me(user: User = Depends(get_current_user)) -> User:
     return user
 
 
-@router.get("/me/settings", response_model=UserMeOut)
+@router.get("/me/settings", response_model=UserSettingsOut)
 def get_my_settings(user: User = Depends(get_current_user)) -> User:
-    # Reuse UserMeOut for now (small schema, includes auto_refresh_seconds).
     return user
 
 

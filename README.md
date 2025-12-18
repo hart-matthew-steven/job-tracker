@@ -32,8 +32,8 @@ Development vs Production:
 - **Production:** the backend runs behind AWS-managed networking and security controls
 
 Security considerations:
-- Uploaded files are scanned using ClamAV before being accepted or processed
-- File handling and scanning behavior is designed to minimize risk and isolate untrusted input
+- File scanning (ClamAV) is planned for the upload pipeline but is not yet fully implemented end-to-end.
+- Until scanning is wired up, uploaded documents may remain in a pending/scanning state.
 
 Detailed architecture diagrams and data-flow documentation live under:
 - `docs/architecture/overview.md`
@@ -45,7 +45,7 @@ Detailed architecture diagrams and data-flow documentation live under:
 ## Frontend
 
 Location: `frontend-web/`  
-Stack: React + Vite (JavaScript)
+Stack: React + Vite (TypeScript)
 
 Responsibilities:
 - User interface for tracking job applications and statuses
@@ -53,8 +53,8 @@ Responsibilities:
 - Communication with the backend via a centralized API client
 
 Common entry points:
-- `frontend-web/src/main.jsx`
-- `frontend-web/src/App.jsx`
+- `frontend-web/src/main.tsx`
+- `frontend-web/src/App.tsx`
 
 Frontend-specific documentation (if present) lives under:
 - `docs/frontend/`
@@ -130,6 +130,7 @@ Frontend:
 
     cd frontend-web
     npm install
+    npm run typecheck
     npm run dev
 
 Backend:

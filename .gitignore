@@ -64,6 +64,7 @@ logs/**
 temp_scripts/**
 !temp_scripts/README.md
 !temp_scripts/.gitkeep
+!temp_scripts/reset_dev_db.py
 
 ############################
 # Databases / Local State

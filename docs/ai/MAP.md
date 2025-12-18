@@ -5,8 +5,8 @@ This file is a quick index of "where things live" to reduce repeated re-explaini
 Update it whenever key entry points or folder structure changes.
 
 ## Frontend (`frontend-web/`)
-- Entry: `frontend-web/src/main.jsx` (expected)
-- App shell: `frontend-web/src/App.jsx` (expected)
+- Entry: `frontend-web/src/main.tsx`
+- App shell: `frontend-web/src/App.tsx`
 - API client: (add path once confirmed)
 - Pages/Routes: (add path once confirmed)
 
