@@ -28,8 +28,9 @@ ruff_cache/
 # --- Logs & run artifacts (excluded from indexing by default) ---
 logs/
 
-# --- One-off scripts (excluded by default; include explicitly when needed) ---
-temp_scripts/
+# --- One-off scripts ---
+# NOTE: Cursor ignore rules do not reliably support negation in all environments.
+# Keep this folder indexed so we can edit committed scripts like reset_dev_db.py.
 
 # --- OS / editor noise ---
 .DS_Store

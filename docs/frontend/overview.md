@@ -7,7 +7,7 @@ This document describes the frontend structure and conventions at a high level.
 ## Stack
 
 - React + Vite
-- JavaScript (TypeScript optional in the future)
+- TypeScript
 
 ---
 
@@ -19,22 +19,26 @@ This document describes the frontend structure and conventions at a high level.
 
 ---
 
-## Structure (fill in once confirmed)
+## Structure
 
 Expected entry points:
-- `frontend-web/src/main.jsx`
-- `frontend-web/src/App.jsx`
+- `frontend-web/src/main.tsx`
+- `frontend-web/src/App.tsx`
 
 Recommended organization:
 - `src/pages/` for route-level views
+- `src/pages/account/` for account/profile/settings screens
+- `src/routes/` for route path constants
 - `src/components/` for reusable UI components
-- `src/components/layout/` for shell/layout building blocks (e.g., `AppShell.jsx`)
-- `src/api/` or `src/apiClient.js` for backend calls
+- `src/components/jobs/` for job-related UI (list/detail/notes)
+- `src/components/layout/` for shell/layout building blocks (e.g., `AppShell.tsx`)
+- `src/api.ts` for backend calls
 - `src/hooks/` for shared logic
+- `src/types/` for shared domain + API DTO types
 
-Notable hooks (frontend-only for now):
-- `src/hooks/useCurrentUser.js` — stubbed current user (API later)
-- `src/hooks/useSettings.js` — local settings persisted to `localStorage` (auto refresh frequency)
+Notable hooks:
+- `src/hooks/useCurrentUser.ts` — current user fetch state
+- `src/hooks/useSettings.ts` — user settings fetch/update state (auto refresh frequency)
 
 ---
 

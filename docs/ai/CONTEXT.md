@@ -43,7 +43,7 @@ Primary goals:
 - Backend issues presigned upload URL → client uploads directly to S3 → client confirms upload → backend tracks document metadata + status.
 
 ## Where to Look
-- Frontend entry: `frontend-web/src/main.jsx` → `frontend-web/src/App.jsx`
+- Frontend entry: `frontend-web/src/main.tsx` → `frontend-web/src/App.tsx`
 - Backend entry: `backend/app/main.py`
 - Backend routes: `backend/app/routes/`
 - DB models: `backend/app/models/`
