@@ -1,11 +1,12 @@
-// src/pages/auth/LoginPage.jsx
+// src/pages/auth/LoginPage.tsx
 import { useMemo, useState } from "react";
 import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
+import type { FormEvent } from "react";
 
 import { loginUser } from "../../api";
-import { useAuth } from "../../auth/AuthProvider.jsx";
+import { useAuth } from "../../auth/AuthProvider";
 
-function safeNext(nextRaw) {
+function safeNext(nextRaw: string | null) {
   const v = (nextRaw || "").trim();
   if (!v) return "/";
   if (v.startsWith("/") && !v.startsWith("//")) return v;
@@ -26,7 +27,7 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  async function onSubmit(e) {
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
     setBusy(true);
@@ -45,7 +46,8 @@ export default function LoginPage() {
       setSession(res.access_token);
       nav(next, { replace: true });
     } catch (err) {
-      setError(err?.message ?? "Login failed");
+      const errObj = err as { message?: string } | null;
+      setError(errObj?.message ?? "Login failed");
     } finally {
       setBusy(false);
     }
@@ -106,10 +108,7 @@ export default function LoginPage() {
 
       <div className="text-sm text-slate-400">
         Don’t have an account?{" "}
-        <NavLink
-          to={registerLink}
-          className="text-blue-300 hover:text-blue-200 font-semibold"
-        >
+        <NavLink to={registerLink} className="text-blue-300 hover:text-blue-200 font-semibold">
           Create one
         </NavLink>
       </div>
@@ -121,3 +120,5 @@ export default function LoginPage() {
     </div>
   );
 }
+
+

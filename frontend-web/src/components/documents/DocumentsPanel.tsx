@@ -1,4 +1,4 @@
-// src/components/documents/DocumentsPanel.jsx
+// src/components/documents/DocumentsPanel.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteDocument,
@@ -12,27 +12,43 @@ import {
 import DocumentSection from "./DocumentSection";
 import DocRow from "./DocRow";
 
+type DocType = { key: string; label: string; multiple: boolean };
+
+type Doc = {
+  id: number;
+  doc_type?: string | null;
+  original_filename?: string | null;
+  content_type?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+};
+
 const DOC_TYPES = [
   { key: "resume", label: "Resume", multiple: false },
   { key: "job_description", label: "Job Description", multiple: false },
   { key: "cover_letter", label: "Cover Letter", multiple: false },
   { key: "thank_you", label: "Thank You Letters", multiple: true },
-];
+] as const satisfies readonly DocType[];
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 
-function safeTime(value) {
+function safeTime(value: string | null | undefined) {
   const t = new Date(value ?? 0).getTime();
   return Number.isNaN(t) ? 0 : t;
 }
 
-export default function DocumentsPanel({ jobId, onActivityChange }) {
-  const [docs, setDocs] = useState([]);
+type Props = {
+  jobId: number | null;
+  onActivityChange?: (iso: string) => void;
+};
+
+export default function DocumentsPanel({ jobId, onActivityChange }: Props) {
+  const [docs, setDocs] = useState<Doc[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const [inputKey, setInputKey] = useState(0);
-  const [activeDocId, setActiveDocId] = useState(null);
+  const [activeDocId, setActiveDocId] = useState<number | null>(null);
 
   // Prevent stale refresh() results when switching jobs quickly
   const refreshSeqRef = useRef(0);
@@ -52,21 +68,23 @@ export default function DocumentsPanel({ jobId, onActivityChange }) {
   }, [jobId]);
 
   async function refresh() {
+    if (!jobId) return;
     const mySeq = ++refreshSeqRef.current;
     setError("");
 
     try {
       const data = await listDocuments(jobId);
       if (refreshSeqRef.current !== mySeq) return; // stale
-      setDocs(Array.isArray(data) ? data : []);
+      setDocs(Array.isArray(data) ? (data as Doc[]) : []);
     } catch (e) {
       if (refreshSeqRef.current !== mySeq) return;
-      setError(e?.message ?? "Failed to load documents");
+      const err = e as { message?: string } | null;
+      setError(err?.message ?? "Failed to load documents");
     }
   }
 
   const grouped = useMemo(() => {
-    const by = {};
+    const by: Record<string, Doc[]> = {};
     for (const t of DOC_TYPES) by[t.key] = [];
 
     for (const d of docs) {
@@ -82,7 +100,8 @@ export default function DocumentsPanel({ jobId, onActivityChange }) {
     return by;
   }, [docs]);
 
-  async function handleUpload(docType, file) {
+  async function handleUpload(docType: string, file: File) {
+    if (!jobId) return;
     if (!file) return;
 
     setError("");
@@ -104,9 +123,10 @@ export default function DocumentsPanel({ jobId, onActivityChange }) {
         size_bytes: file.size || null,
       });
 
-      const doc = presign?.document;
+      const presign2 = presign as { document?: Doc; upload_url?: string };
+      const doc = presign2?.document;
       const docId = doc?.id;
-      const uploadUrl = presign?.upload_url;
+      const uploadUrl = presign2?.upload_url;
 
       if (!docId || !uploadUrl) {
         throw new Error("Presign failed (missing upload URL).");
@@ -150,7 +170,8 @@ export default function DocumentsPanel({ jobId, onActivityChange }) {
       // reset file input so same file can be selected again
       setInputKey((k) => k + 1);
     } catch (e) {
-      setError(e?.message ?? "Upload failed");
+      const err = e as { message?: string } | null;
+      setError(err?.message ?? "Upload failed");
       // If presign created a pending doc row but upload failed, refresh so UI matches server state
       await refresh().catch(() => {});
     } finally {
@@ -159,25 +180,28 @@ export default function DocumentsPanel({ jobId, onActivityChange }) {
     }
   }
 
-  async function handleDownload(docId) {
+  async function handleDownload(docId: number) {
+    if (!jobId) return;
     setBusy(true);
     setActiveDocId(docId);
     setError("");
 
     try {
       const res = await presignDocumentDownload(jobId, docId);
-      const url = res?.download_url;
+      const url = (res as { download_url?: string } | null)?.download_url;
       if (!url) throw new Error("Download link missing.");
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (e) {
-      setError(e?.message ?? "Download failed");
+      const err = e as { message?: string } | null;
+      setError(err?.message ?? "Download failed");
     } finally {
       setBusy(false);
       setActiveDocId(null);
     }
   }
 
-  async function handleDelete(docId) {
+  async function handleDelete(docId: number) {
+    if (!jobId) return;
     setBusy(true);
     setActiveDocId(docId);
     setError("");
@@ -191,7 +215,8 @@ export default function DocumentsPanel({ jobId, onActivityChange }) {
       await refresh();
       onActivityChange?.(new Date().toISOString());
     } catch (e) {
-      setError(e?.message ?? "Delete failed");
+      const err = e as { message?: string } | null;
+      setError(err?.message ?? "Delete failed");
       await refresh().catch(() => {});
     } finally {
       setBusy(false);

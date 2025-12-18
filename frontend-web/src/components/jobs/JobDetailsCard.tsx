@@ -1,3 +1,5 @@
+import type { Job } from "../../types/api";
+
 const STATUS_OPTIONS = [
   { value: "applied", label: "Applied" },
   { value: "interviewing", label: "Interviewing" },
@@ -5,7 +7,7 @@ const STATUS_OPTIONS = [
   { value: "rejected", label: "Rejected" },
 ];
 
-function fmtDateTime(dt) {
+function fmtDateTime(dt: string | null | undefined) {
   if (!dt) return "—";
   const d = new Date(dt);
   if (Number.isNaN(d.getTime())) return "—";
@@ -19,12 +21,20 @@ function fmtDateTime(dt) {
   });
 }
 
-function getAppliedDate(job) {
+function getAppliedDate(job: Job) {
   return job?.applied_date ?? job?.created_at ?? null;
 }
 
-export default function JobDetailsCard({ job, onStatusChange }) {
+type Props = {
+  job: Job | null;
+  onStatusChange?: (nextStatus: string) => void;
+};
+
+type JobWithActivity = Job & { last_activity_at?: string | null };
+
+export default function JobDetailsCard({ job, onStatusChange }: Props) {
   if (!job) return null;
+  const job2 = job as JobWithActivity;
 
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
@@ -59,7 +69,7 @@ export default function JobDetailsCard({ job, onStatusChange }) {
         </div>
         <div>
           <span className="text-slate-500">Last activity:</span>{" "}
-          {fmtDateTime(job.last_activity_at)}
+          {fmtDateTime(job2.last_activity_at)}
         </div>
       </div>
 

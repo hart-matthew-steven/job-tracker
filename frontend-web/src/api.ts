@@ -1,4 +1,25 @@
-// src/api.js
+// src/api.ts
+import type {
+  AddNoteIn,
+  ChangePasswordIn,
+  ConfirmUploadIn,
+  CreateJobIn,
+  DocumentItem,
+  Job,
+  LoginIn,
+  LoginOut,
+  MessageOut,
+  Note,
+  PatchJobIn,
+  PresignUploadIn,
+  PresignUploadOut,
+  RegisterIn,
+  ResendVerificationIn,
+  UpdateSettingsIn,
+  UserMeOut,
+  UserSettingsOut,
+} from "./types/api";
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://matts-macbook.local:8000").replace(
   /\/$/,
   ""
@@ -6,16 +27,16 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://matts-macbook.loc
 
 const TOKEN_KEY = "access_token";
 
-export function setAccessToken(token) {
+export function setAccessToken(token: string | null): void {
   if (!token) localStorage.removeItem(TOKEN_KEY);
   else localStorage.setItem(TOKEN_KEY, token);
 }
 
-export function getAccessToken() {
+export function getAccessToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
-export function logout() {
+export function logout(): void {
   setAccessToken(null);
 }
 
@@ -23,12 +44,14 @@ export function logout() {
  * Only attach Authorization for calls to *our* API base.
  * (Presigned S3 URLs, etc. must never receive Authorization headers.)
  */
-function isApiPath(path) {
+function isApiPath(path: string): boolean {
   return typeof path === "string" && path.startsWith("/");
 }
 
-function buildHeaders(options = {}, { includeAuth = true } = {}) {
-  const headers = { ...(options.headers ?? {}) };
+type JsonRequestOptions = Omit<RequestInit, "headers"> & { headers?: Record<string, string> };
+
+function buildHeaders(options: JsonRequestOptions = {}, { includeAuth = true } = {}): Record<string, string> {
+  const headers: Record<string, string> = { ...(options.headers ?? {}) };
   if (includeAuth) {
     const token = getAccessToken();
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -36,13 +59,18 @@ function buildHeaders(options = {}, { includeAuth = true } = {}) {
   return headers;
 }
 
-async function parseError(res) {
+async function parseError(res: Response): Promise<string> {
   const contentType = res.headers.get("content-type") || "";
 
   if (contentType.includes("application/json")) {
     try {
-      const data = await res.json();
-      return data?.detail ?? data?.message ?? `HTTP ${res.status} ${res.statusText}`;
+      const data: unknown = await res.json();
+      if (typeof data === "object" && data) {
+        const obj = data as Record<string, unknown>;
+        const msg = obj.detail ?? obj.message;
+        if (typeof msg === "string" && msg) return msg;
+      }
+      return `HTTP ${res.status} ${res.statusText}`;
     } catch {
       // fall through
     }
@@ -57,14 +85,14 @@ async function parseError(res) {
  * ------------------- */
 
 // Prevent multiple simultaneous refresh calls
-let refreshPromise = null;
+let refreshPromise: Promise<string | null> | null = null;
 
 /**
  * POST /auth/refresh
  * Uses HttpOnly refresh cookie (credentials: include)
  * Returns { access_token, token_type }
  */
-async function tryRefreshAccessToken() {
+async function tryRefreshAccessToken(): Promise<string | null> {
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
@@ -77,10 +105,13 @@ async function tryRefreshAccessToken() {
 
       if (!res.ok) return null;
 
-      const data = await res.json().catch(() => null);
-      if (data?.access_token) {
-        setAccessToken(data.access_token);
-        return data.access_token;
+      const data: unknown = await res.json().catch(() => null);
+      const accessToken =
+        typeof data === "object" && data && "access_token" in data ? (data as { access_token?: unknown }).access_token : null;
+
+      if (typeof accessToken === "string" && accessToken) {
+        setAccessToken(accessToken);
+        return accessToken;
       }
       return null;
     } catch {
@@ -99,11 +130,11 @@ async function tryRefreshAccessToken() {
  * - Sends cookies (needed for refresh cookie workflows)
  * - On 401: try refresh once, retry once
  */
-async function requestJson(path, options = {}) {
+async function requestJson<T = unknown>(path: string, options: JsonRequestOptions = {}): Promise<T> {
   const includeAuth = isApiPath(path);
   const baseHeaders = buildHeaders(options, { includeAuth });
 
-  const doFetch = (hdrs) =>
+  const doFetch = (hdrs: Record<string, string>) =>
     fetch(`${API_BASE}${path}`, {
       ...options,
       headers: hdrs,
@@ -130,22 +161,22 @@ async function requestJson(path, options = {}) {
     throw new Error(msg);
   }
 
-  if (res.status === 204) return null;
+  if (res.status === 204) return null as T;
 
   const contentType = res.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) return await res.json();
+  if (contentType.includes("application/json")) return (await res.json()) as T;
 
-  return await res.text();
+  return (await res.text()) as T;
 }
 
 /**
  * Void request helper (same refresh logic).
  */
-async function requestVoid(path, options = {}) {
+async function requestVoid(path: string, options: JsonRequestOptions = {}): Promise<void> {
   const includeAuth = isApiPath(path);
   const baseHeaders = buildHeaders(options, { includeAuth });
 
-  const doFetch = (hdrs) =>
+  const doFetch = (hdrs: Record<string, string>) =>
     fetch(`${API_BASE}${path}`, {
       ...options,
       headers: hdrs,
@@ -174,29 +205,29 @@ async function requestVoid(path, options = {}) {
 /** -------------------
  * Auth
  * ------------------- */
-export function registerUser(payload) {
-  return requestJson(`/auth/register`, {
+export function registerUser(payload: RegisterIn): Promise<MessageOut> {
+  return requestJson<MessageOut>(`/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 }
 
-export function verifyEmail(token) {
-  return requestJson(`/auth/verify?token=${encodeURIComponent(token)}`);
+export function verifyEmail(token: string): Promise<MessageOut> {
+  return requestJson<MessageOut>(`/auth/verify?token=${encodeURIComponent(token)}`);
 }
 
-export function resendVerification(payload) {
-  return requestJson(`/auth/resend-verification`, {
+export function resendVerification(payload: ResendVerificationIn): Promise<MessageOut> {
+  return requestJson<MessageOut>(`/auth/resend-verification`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 }
 
-export async function loginUser(payload) {
+export async function loginUser(payload: LoginIn): Promise<LoginOut> {
   // ✅ MUST include credentials so browser stores HttpOnly refresh cookie
-  const res = await requestJson(`/auth/login`, {
+  const res = await requestJson<LoginOut>(`/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -207,7 +238,7 @@ export async function loginUser(payload) {
   return res;
 }
 
-export async function logoutUser() {
+export async function logoutUser(): Promise<void> {
   try {
     // ✅ sends cookie so backend can revoke + clear it
     await requestVoid(`/auth/logout`, { method: "POST", credentials: "include" });
@@ -221,24 +252,24 @@ export async function logoutUser() {
 /** -------------------
  * Users
  * ------------------- */
-export function getCurrentUser() {
-  return requestJson(`/users/me`);
+export function getCurrentUser(): Promise<UserMeOut> {
+  return requestJson<UserMeOut>(`/users/me`);
 }
 
-export function changePassword(payload) {
-  return requestJson(`/users/me/change-password`, {
+export function changePassword(payload: ChangePasswordIn): Promise<MessageOut> {
+  return requestJson<MessageOut>(`/users/me/change-password`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 }
 
-export function getMySettings() {
-  return requestJson(`/users/me/settings`);
+export function getMySettings(): Promise<UserSettingsOut> {
+  return requestJson<UserSettingsOut>(`/users/me/settings`);
 }
 
-export function updateMySettings(payload) {
-  return requestJson(`/users/me/settings`, {
+export function updateMySettings(payload: UpdateSettingsIn): Promise<MessageOut> {
+  return requestJson<MessageOut>(`/users/me/settings`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -248,24 +279,24 @@ export function updateMySettings(payload) {
 /** -------------------
  * Jobs
  * ------------------- */
-export function listJobs() {
-  return requestJson(`/jobs`);
+export function listJobs(): Promise<Job[]> {
+  return requestJson<Job[]>(`/jobs`);
 }
 
-export function getJob(jobId) {
-  return requestJson(`/jobs/${jobId}`);
+export function getJob(jobId: number | string): Promise<Job> {
+  return requestJson<Job>(`/jobs/${jobId}`);
 }
 
-export function createJob(payload) {
-  return requestJson(`/jobs`, {
+export function createJob(payload: CreateJobIn): Promise<Job> {
+  return requestJson<Job>(`/jobs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 }
 
-export function patchJob(jobId, payload) {
-  return requestJson(`/jobs/${jobId}`, {
+export function patchJob(jobId: number | string, payload: PatchJobIn): Promise<Job> {
+  return requestJson<Job>(`/jobs/${jobId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -275,51 +306,53 @@ export function patchJob(jobId, payload) {
 /** -------------------
  * Notes
  * ------------------- */
-export function listNotes(jobId) {
-  return requestJson(`/jobs/${jobId}/notes`);
+export function listNotes(jobId: number | string): Promise<Note[]> {
+  return requestJson<Note[]>(`/jobs/${jobId}/notes`);
 }
 
-export function addNote(jobId, payload) {
-  return requestJson(`/jobs/${jobId}/notes`, {
+export function addNote(jobId: number | string, payload: AddNoteIn): Promise<Note> {
+  return requestJson<Note>(`/jobs/${jobId}/notes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 }
 
-export function deleteNote(jobId, noteId) {
-  return requestJson(`/jobs/${jobId}/notes/${noteId}`, { method: "DELETE" });
+export function deleteNote(jobId: number | string, noteId: number | string): Promise<MessageOut | null> {
+  return requestJson<MessageOut | null>(`/jobs/${jobId}/notes/${noteId}`, { method: "DELETE" });
 }
 
 /** -------------------
  * Documents
  * ------------------- */
-export function listDocuments(jobId) {
-  return requestJson(`/jobs/${jobId}/documents`);
+export function listDocuments(jobId: number | string): Promise<DocumentItem[]> {
+  return requestJson<DocumentItem[]>(`/jobs/${jobId}/documents`);
 }
 
-export function presignDocumentUpload(jobId, payload) {
-  return requestJson(`/jobs/${jobId}/documents/presign-upload`, {
+export function presignDocumentUpload(jobId: number | string, payload: PresignUploadIn): Promise<PresignUploadOut> {
+  return requestJson<PresignUploadOut>(`/jobs/${jobId}/documents/presign-upload`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 }
 
-export function confirmDocumentUpload(jobId, payload) {
-  return requestJson(`/jobs/${jobId}/documents/confirm-upload`, {
+export function confirmDocumentUpload(jobId: number | string, payload: ConfirmUploadIn): Promise<MessageOut> {
+  return requestJson<MessageOut>(`/jobs/${jobId}/documents/confirm-upload`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 }
 
-export function presignDocumentDownload(jobId, docId) {
-  return requestJson(`/jobs/${jobId}/documents/${docId}/presign-download`);
+export function presignDocumentDownload(jobId: number | string, docId: number | string): Promise<{ download_url: string } & Record<string, unknown>> {
+  return requestJson<{ download_url: string } & Record<string, unknown>>(
+    `/jobs/${jobId}/documents/${docId}/presign-download`
+  );
 }
 
-export function deleteDocument(jobId, docId) {
-  return requestJson(`/jobs/${jobId}/documents/${docId}`, { method: "DELETE" });
+export function deleteDocument(jobId: number | string, docId: number | string): Promise<MessageOut | null> {
+  return requestJson<MessageOut | null>(`/jobs/${jobId}/documents/${docId}`, { method: "DELETE" });
 }
 
 /**
@@ -327,7 +360,7 @@ export function deleteDocument(jobId, docId) {
  * This must be a PUT to the presigned URL.
  * IMPORTANT: Do NOT attach Authorization header here.
  */
-export async function uploadToS3PresignedUrl(uploadUrl, file) {
+export async function uploadToS3PresignedUrl(uploadUrl: string, file: File): Promise<void> {
   const res = await fetch(uploadUrl, {
     method: "PUT",
     headers: file?.type ? { "Content-Type": file.type } : undefined,
