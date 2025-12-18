@@ -1,4 +1,37 @@
-// src/components/documents/DocumentSection.jsx
+// src/components/documents/DocumentSection.tsx
+import type { ChangeEvent, ComponentType } from "react";
+
+type DocType = { key: string; label: string; multiple: boolean };
+
+type Doc = {
+  id: number;
+  created_at?: string | null;
+  status?: string | null;
+  doc_type?: string | null;
+  original_filename?: string | null;
+  content_type?: string | null;
+};
+
+type DocRowProps = {
+  doc: Doc;
+  busy?: boolean;
+  activeDocId?: number | null;
+  onDownload: () => void;
+  onDelete: () => void;
+};
+
+type Props = {
+  type: DocType;
+  items: Doc[];
+  busy: boolean;
+  activeDocId: number | null;
+  inputKey: number;
+  onUpload: (docType: string, file: File) => Promise<void>;
+  onDownload: (docId: number) => Promise<void> | void;
+  onDelete: (docId: number) => Promise<void> | void;
+  DocRow: ComponentType<DocRowProps> | null;
+};
+
 export default function DocumentSection({
   type,
   items,
@@ -9,7 +42,8 @@ export default function DocumentSection({
   onDownload,
   onDelete,
   DocRow,
-}) {
+}: Props) {
+  const Row = DocRow;
   const singleDoc = !type.multiple ? items[0] : null;
 
   const hasSingleAlready = !type.multiple && !!singleDoc;
@@ -25,7 +59,7 @@ export default function DocumentSection({
   const accept =
     ".pdf,.doc,.docx,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain";
 
-  async function handleFileChange(e) {
+  async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files || []);
     // allow selecting same file again next time
     e.target.value = "";
@@ -85,8 +119,8 @@ export default function DocumentSection({
                 hasSingleAlready
                   ? "Delete the existing document to upload a new one"
                   : type.multiple
-                  ? "Upload one or more files"
-                  : "Upload"
+                    ? "Upload one or more files"
+                    : "Upload"
               }
             >
               Upload
@@ -107,13 +141,15 @@ export default function DocumentSection({
           {!singleDoc ? (
             <div className="text-sm text-slate-400">No document uploaded.</div>
           ) : (
-            <DocRow
-              doc={singleDoc}
-              busy={busy}
-              activeDocId={activeDocId}
-              onDownload={() => onDownload(singleDoc.id)}
-              onDelete={() => onDelete(singleDoc.id)}
-            />
+            Row && (
+              <Row
+                doc={singleDoc}
+                busy={busy}
+                activeDocId={activeDocId}
+                onDownload={() => onDownload(singleDoc.id)}
+                onDelete={() => onDelete(singleDoc.id)}
+              />
+            )
           )}
         </div>
       )}
@@ -132,13 +168,15 @@ export default function DocumentSection({
               key={doc.id}
               className="rounded-lg border border-slate-800 bg-slate-950/30 p-3"
             >
-              <DocRow
-                doc={doc}
-                busy={busy}
-                activeDocId={activeDocId}
-                onDownload={() => onDownload(doc.id)}
-                onDelete={() => onDelete(doc.id)}
-              />
+              {Row && (
+                <Row
+                  doc={doc}
+                  busy={busy}
+                  activeDocId={activeDocId}
+                  onDownload={() => onDownload(doc.id)}
+                  onDelete={() => onDelete(doc.id)}
+                />
+              )}
             </div>
           ))}
         </div>

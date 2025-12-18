@@ -1,4 +1,9 @@
-function fmtDateTime(dt) {
+import type { Dispatch, SetStateAction } from "react";
+import type { Note } from "../../types/api";
+
+type NoteWithFields = Note & { body?: string; created_at?: string | null };
+
+function fmtDateTime(dt: string | null | undefined) {
   if (!dt) return "—";
   const d = new Date(dt);
   if (Number.isNaN(d.getTime())) return "—";
@@ -13,13 +18,15 @@ function fmtDateTime(dt) {
   });
 }
 
-export default function NotesCard({
-  notes,
-  noteText,
-  setNoteText,
-  onAddNote,
-  onDeleteNote,
-}) {
+type Props = {
+  notes: NoteWithFields[];
+  noteText: string;
+  setNoteText: Dispatch<SetStateAction<string>>;
+  onAddNote: () => void | Promise<void>;
+  onDeleteNote: (noteId: number) => void | Promise<void>;
+};
+
+export default function NotesCard({ notes, noteText, setNoteText, onAddNote, onDeleteNote }: Props) {
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
       <div className="text-xl font-semibold mb-4">Notes</div>
@@ -35,9 +42,7 @@ export default function NotesCard({
             className="bg-slate-800/70 border border-slate-700 rounded-lg px-4 py-3 flex items-center justify-between gap-4"
           >
             <div className="min-w-0">
-              <div className="text-xs text-slate-400 mb-1">
-                {fmtDateTime(note.created_at)}
-              </div>
+              <div className="text-xs text-slate-400 mb-1">{fmtDateTime(note.created_at)}</div>
               <div className="text-slate-100 whitespace-pre-wrap break-words">
                 {note.body}
               </div>

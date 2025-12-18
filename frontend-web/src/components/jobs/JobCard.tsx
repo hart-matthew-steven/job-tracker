@@ -1,4 +1,19 @@
-export default function JobCard({ form, setForm, onCreateJob }) {
+import type { Dispatch, FormEvent, SetStateAction } from "react";
+
+type JobFormState = {
+  company_name: string;
+  job_title: string;
+  location: string;
+  job_url: string;
+};
+
+type Props = {
+  form: JobFormState;
+  setForm: Dispatch<SetStateAction<JobFormState>>;
+  onCreateJob: (e: FormEvent<HTMLFormElement>) => void | Promise<void>;
+};
+
+export default function JobCard({ form, setForm, onCreateJob }: Props) {
   return (
     <form
       onSubmit={onCreateJob}

@@ -1,4 +1,8 @@
-function fmtDateTime(dt) {
+import type { Job } from "../../types/api";
+
+type JobWithActivity = Job & { last_activity_at?: string | null };
+
+function fmtDateTime(dt: string | null | undefined) {
   if (!dt) return "—";
   const d = new Date(dt);
   if (Number.isNaN(d.getTime())) return "—";
@@ -13,11 +17,11 @@ function fmtDateTime(dt) {
   });
 }
 
-function jobSortKey(job) {
+function jobSortKey(job: JobWithActivity) {
   return job?.last_activity_at ?? job?.applied_date ?? job?.created_at ?? null;
 }
 
-function getActivityDotColor(iso) {
+function getActivityDotColor(iso: string | null | undefined) {
   if (!iso) return "bg-slate-500";
 
   const now = Date.now();
@@ -29,7 +33,13 @@ function getActivityDotColor(iso) {
   return "bg-red-500";
 }
 
-export default function JobsList({ jobs, selectedJobId, onSelectJob }) {
+type Props = {
+  jobs: JobWithActivity[];
+  selectedJobId: number | null;
+  onSelectJob: (job: JobWithActivity) => void;
+};
+
+export default function JobsList({ jobs, selectedJobId, onSelectJob }: Props) {
   return (
     <div className="space-y-3">
       {jobs.map((job) => {

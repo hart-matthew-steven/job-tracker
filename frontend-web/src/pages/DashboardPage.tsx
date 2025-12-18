@@ -1,4 +1,4 @@
-// src/pages/DashboardPage.jsx
+// src/pages/DashboardPage.tsx
 import { useEffect, useMemo, useState } from "react";
 import {
   BarChart,
@@ -14,8 +14,9 @@ import {
 } from "recharts";
 
 import { listJobs } from "../api";
+import type { Job } from "../types/api";
 
-function startOfWeek(dateLike) {
+function startOfWeek(dateLike: string | number | Date) {
   const d = new Date(dateLike);
   if (Number.isNaN(d.getTime())) return null;
 
@@ -26,11 +27,11 @@ function startOfWeek(dateLike) {
   return d;
 }
 
-function fmtWeekLabel(d) {
+function fmtWeekLabel(d: Date) {
   return d.toLocaleDateString(undefined, { month: "short", day: "2-digit" });
 }
 
-function getAppliedDate(job) {
+function getAppliedDate(job: Job) {
   // backend: applied_date (Date) OR created_at (DateTime)
   return job?.applied_date ?? job?.created_at ?? null;
 }
@@ -39,13 +40,12 @@ function getAppliedDate(job) {
 const PIE_COLORS = ["#38bdf8", "#0ea5e9", "#94a3b8", "#64748b", "#475569", "#334155"];
 
 export default function DashboardPage() {
-  const [jobs, setJobs] = useState([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function refresh() {
@@ -54,9 +54,9 @@ export default function DashboardPage() {
 
     try {
       const data = await listJobs(); // ✅ uses api.js helper (adds Authorization)
-      setJobs(Array.isArray(data) ? data : []);
+      setJobs(Array.isArray(data) ? (data as Job[]) : []);
     } catch (e) {
-      const msg = e?.message ?? "Failed to load jobs";
+      const msg = (e as { message?: string } | null)?.message ?? "Failed to load jobs";
 
       // If api.js logged you out (401), give a clearer hint
       if (String(msg).toLowerCase().includes("401")) {
@@ -73,7 +73,7 @@ export default function DashboardPage() {
 
   // Donut: pipeline counts by status
   const pipeline = useMemo(() => {
-    const counts = new Map();
+    const counts = new Map<string, number>();
     for (const j of jobs) {
       const s = (j.status ?? "applied").toLowerCase();
       counts.set(s, (counts.get(s) ?? 0) + 1);
@@ -97,7 +97,7 @@ export default function DashboardPage() {
 
   // Weekly apps trend (last 10 weeks)
   const weeklyApps = useMemo(() => {
-    const map = new Map();
+    const map = new Map<string, number>();
 
     for (const j of jobs) {
       const dt = getAppliedDate(j);
@@ -115,7 +115,7 @@ export default function DashboardPage() {
         const d = new Date(iso);
         return { iso, week: fmtWeekLabel(d), count, d };
       })
-      .sort((a, b) => a.d - b.d);
+      .sort((a, b) => a.d.getTime() - b.d.getTime());
 
     return points.slice(-10);
   }, [jobs]);
@@ -125,10 +125,7 @@ export default function DashboardPage() {
     () => jobs.filter((j) => (j.status ?? "").toLowerCase() === "interviewing").length,
     [jobs]
   );
-  const offerCount = useMemo(
-    () => jobs.filter((j) => (j.status ?? "").toLowerCase() === "offer").length,
-    [jobs]
-  );
+  const offerCount = useMemo(() => jobs.filter((j) => (j.status ?? "").toLowerCase() === "offer").length, [jobs]);
   const rejectedCount = useMemo(
     () => jobs.filter((j) => (j.status ?? "").toLowerCase() === "rejected").length,
     [jobs]
@@ -148,9 +145,7 @@ export default function DashboardPage() {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-xl border border-red-900/40 bg-red-950/30 px-4 py-3 text-sm text-red-200">
-          {error}
-        </div>
+        <div className="mb-6 rounded-xl border border-red-900/40 bg-red-950/30 px-4 py-3 text-sm text-red-200">{error}</div>
       )}
 
       {/* KPI cards */}
@@ -179,8 +174,7 @@ export default function DashboardPage() {
 
       {!loading && !error && !hasCharts && (
         <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5 text-sm text-slate-300">
-          No jobs yet. Add one on the <span className="text-slate-100 font-semibold">Jobs</span>{" "}
-          page and your dashboard will populate.
+          No jobs yet. Add one on the <span className="text-slate-100 font-semibold">Jobs</span> page and your dashboard will populate.
         </div>
       )}
 
@@ -198,14 +192,7 @@ export default function DashboardPage() {
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie
-                      data={pipeline}
-                      dataKey="value"
-                      nameKey="status"
-                      innerRadius="55%"
-                      outerRadius="85%"
-                      paddingAngle={2}
-                    >
+                    <Pie data={pipeline} dataKey="value" nameKey="status" innerRadius="55%" outerRadius="85%" paddingAngle={2}>
                       {pipeline.map((_, idx) => (
                         <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
                       ))}
@@ -223,18 +210,10 @@ export default function DashboardPage() {
                 ) : (
                   <>
                     {pipeline.map((row, idx) => (
-                      <div
-                        key={row.status}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/30 px-3 py-2"
-                      >
+                      <div key={row.status} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/30 px-3 py-2">
                         <div className="flex items-center gap-2 min-w-0">
-                          <span
-                            className="h-3 w-3 rounded-sm"
-                            style={{ background: PIE_COLORS[idx % PIE_COLORS.length] }}
-                          />
-                          <span className="text-sm text-slate-200 capitalize truncate">
-                            {row.status}
-                          </span>
+                          <span className="h-3 w-3 rounded-sm" style={{ background: PIE_COLORS[idx % PIE_COLORS.length] }} />
+                          <span className="text-sm text-slate-200 capitalize truncate">{row.status}</span>
                         </div>
                         <div className="text-sm font-semibold text-slate-100">{row.value}</div>
                       </div>
@@ -255,19 +234,12 @@ export default function DashboardPage() {
             </div>
 
             <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%"> 
                 <BarChart data={weeklyApps}>
                   <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
                   <XAxis dataKey="week" tick={{ fill: "#94a3b8", fontSize: 12 }} />
                   <YAxis allowDecimals={false} tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <Tooltip
-                    contentStyle={{
-                      background: "#0b1220",
-                      border: "1px solid #1f2937",
-                      color: "#e2e8f0",
-                    }}
-                    labelStyle={{ color: "#94a3b8" }}
-                  />
+                  <Tooltip contentStyle={{ background: "#0b1220", border: "1px solid #1f2937", color: "#e2e8f0" }} labelStyle={{ color: "#94a3b8" }} />
                   <Bar dataKey="count" fill="#38bdf8" />
                 </BarChart>
               </ResponsiveContainer>
@@ -278,3 +250,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+

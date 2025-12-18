@@ -1,8 +1,11 @@
-// src/auth/RequireAuth.jsx
+// src/auth/RequireAuth.tsx
+import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { useAuth } from "./AuthProvider.jsx";
+import { useAuth } from "./AuthProvider";
 
-export default function RequireAuth({ children }) {
+type Props = { children: ReactNode };
+
+export default function RequireAuth({ children }: Props) {
   const { isReady, isAuthenticated } = useAuth();
   const location = useLocation();
 
@@ -17,15 +20,18 @@ export default function RequireAuth({ children }) {
 
   if (!isAuthenticated) {
     // If the user explicitly logged out, always land on /login (no `next=`).
+    let justLoggedOut = false;
     try {
       const flagged = sessionStorage.getItem("jt.justLoggedOut");
       if (flagged) {
         sessionStorage.removeItem("jt.justLoggedOut");
-        return <Navigate to="/login" replace />;
+        justLoggedOut = true;
       }
     } catch {
       // ignore
     }
+
+    if (justLoggedOut) return <Navigate to="/login" replace />;
 
     const next = location.pathname + location.search;
     return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
@@ -33,3 +39,5 @@ export default function RequireAuth({ children }) {
 
   return children;
 }
+
+

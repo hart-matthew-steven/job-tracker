@@ -1,6 +1,14 @@
-// src/components/documents/DocRow.jsx
+// src/components/documents/DocRow.tsx
 
-function fmtDateTime(dt) {
+type Doc = {
+  id: number;
+  original_filename?: string | null;
+  content_type?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+};
+
+function fmtDateTime(dt: string | null | undefined) {
   if (!dt) return "—";
   const d = new Date(dt);
   if (Number.isNaN(d.getTime())) return "—";
@@ -14,7 +22,7 @@ function fmtDateTime(dt) {
   });
 }
 
-function StatusBadge({ status }) {
+function StatusBadge({ status }: { status?: string | null }) {
   const s = (status ?? "").toLowerCase();
   const base =
     "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] border";
@@ -60,13 +68,15 @@ function StatusBadge({ status }) {
   );
 }
 
-export default function DocRow({
-  doc,
-  onDownload,
-  onDelete,
-  busy = false,
-  activeDocId = null,
-}) {
+type Props = {
+  doc: Doc | null;
+  onDownload: () => void;
+  onDelete: () => void;
+  busy?: boolean;
+  activeDocId?: number | "upload" | null;
+};
+
+export default function DocRow({ doc, onDownload, onDelete, busy = false, activeDocId = null }: Props) {
   if (!doc) {
     return (
       <div className="text-sm text-slate-400">

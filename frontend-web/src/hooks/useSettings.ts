@@ -1,8 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getMySettings, updateMySettings } from "../api";
+import type { UpdateSettingsIn, UserSettingsOut } from "../types/api";
 
-export function useSettings() {
-  const [settings, setSettings] = useState({ autoRefreshSeconds: 0 });
+export type SettingsState = {
+  autoRefreshSeconds: number;
+};
+
+export type UseSettingsResult = {
+  settings: SettingsState;
+  loading: boolean;
+  error: string;
+  reload: () => Promise<void>;
+  setAutoRefreshSeconds: (seconds: number) => Promise<void>;
+};
+
+export function useSettings(): UseSettingsResult {
+  const [settings, setSettings] = useState<SettingsState>({ autoRefreshSeconds: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -10,12 +23,13 @@ export function useSettings() {
     setError("");
     setLoading(true);
     try {
-      const res = await getMySettings();
+      const res: UserSettingsOut = await getMySettings();
       setSettings({
         autoRefreshSeconds: Number(res?.auto_refresh_seconds ?? 0) || 0,
       });
     } catch (e) {
-      setError(e?.message ?? "Failed to load settings");
+      const err = e as { message?: string } | null;
+      setError(err?.message ?? "Failed to load settings");
       setSettings({ autoRefreshSeconds: 0 });
     } finally {
       setLoading(false);
@@ -32,14 +46,16 @@ export function useSettings() {
       loading,
       error,
       reload,
-      setAutoRefreshSeconds: (seconds) =>
+      setAutoRefreshSeconds: (seconds: number) =>
         (async () => {
           const next = Number(seconds) || 0;
           setSettings((prev) => ({ ...prev, autoRefreshSeconds: next }));
           try {
-            await updateMySettings({ auto_refresh_seconds: next });
+            const payload: UpdateSettingsIn = { auto_refresh_seconds: next };
+            await updateMySettings(payload);
           } catch (e) {
-            setError(e?.message ?? "Failed to update settings");
+            const err = e as { message?: string } | null;
+            setError(err?.message ?? "Failed to update settings");
           }
         })(),
     }),

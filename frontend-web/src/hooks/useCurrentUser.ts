@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getCurrentUser } from "../api";
+import type { UserMeOut } from "../types/api";
 
-export function useCurrentUser() {
-  const [user, setUser] = useState(null);
+export type UseCurrentUserResult = {
+  user: UserMeOut | null;
+  loading: boolean;
+  error: string;
+  reload: () => Promise<void>;
+  // Backwards compatible flag used by the shell/UI to label data source.
+  isStub: boolean;
+};
+
+export function useCurrentUser(): UseCurrentUserResult {
+  const [user, setUser] = useState<UserMeOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -10,11 +20,12 @@ export function useCurrentUser() {
     setError("");
     setLoading(true);
     try {
-      const res = await getCurrentUser();
+      const res: UserMeOut = await getCurrentUser();
       setUser(res ?? null);
     } catch (e) {
       setUser(null);
-      setError(e?.message ?? "Failed to load profile");
+      const err = e as { message?: string } | null;
+      setError(err?.message ?? "Failed to load profile");
     } finally {
       setLoading(false);
     }
@@ -30,7 +41,6 @@ export function useCurrentUser() {
       loading,
       error,
       reload,
-      // Backwards compatible flag used by the shell/UI to label data source.
       isStub: false,
     }),
     [user, loading, error, reload]
