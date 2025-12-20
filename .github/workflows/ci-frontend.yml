@@ -1,0 +1,91 @@
+name: CI - Frontend
+
+on:
+  pull_request:
+    paths:
+      - "frontend-web/**"
+      - ".github/workflows/ci-frontend.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "frontend-web/**"
+      - ".github/workflows/ci-frontend.yml"
+  workflow_dispatch:
+
+jobs:
+  typecheck-lint-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "frontend-web/package-lock.json"
+
+      - name: Install
+        working-directory: frontend-web
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: frontend-web
+        run: npm run typecheck
+
+      - name: Lint
+        working-directory: frontend-web
+        run: npm run lint
+
+      - name: Tests
+        working-directory: frontend-web
+        run: npm test
+
+name: CI - Frontend
+
+on:
+  pull_request:
+    paths:
+      - "frontend-web/**"
+      - ".github/workflows/ci-frontend.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "frontend-web/**"
+      - ".github/workflows/ci-frontend.yml"
+
+jobs:
+  typecheck-lint-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "frontend-web/package-lock.json"
+
+      - name: Install
+        working-directory: frontend-web
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: frontend-web
+        run: npm run typecheck
+
+      - name: Lint
+        working-directory: frontend-web
+        run: npm run lint
+
+      - name: Tests
+        working-directory: frontend-web
+        run: npm test
+
+
+

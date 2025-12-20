@@ -1,0 +1,97 @@
+name: CI - Backend
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/ci-backend.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "backend/**"
+      - ".github/workflows/ci-backend.yml"
+  workflow_dispatch:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint (ruff - minimal)
+        run: |
+          pip install ruff==0.8.4
+          # Keep this low-risk: catch syntax errors + undefined names without enforcing formatting.
+          ruff check backend --select E9,F --ignore F401 --output-format=github
+
+      - name: Tests (pytest)
+        working-directory: backend
+        env:
+          JWT_SECRET: ci_jwt_secret
+        run: |
+          python -m pytest -q
+
+name: CI - Backend
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/ci-backend.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "backend/**"
+      - ".github/workflows/ci-backend.yml"
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        run: |
+          pip install ruff==0.8.4
+          # Keep this low-risk: catch syntax errors + undefined names without enforcing style.
+          ruff check backend --select E9,F --ignore F401 --output-format=github
+
+      - name: Tests (pytest)
+        working-directory: backend
+        env:
+          JWT_SECRET: ci_jwt_secret
+        run: |
+          python -m pytest -q
+
+
+
