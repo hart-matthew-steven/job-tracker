@@ -33,6 +33,10 @@ def update_my_settings(
     user: User = Depends(get_current_user),
 ):
     user.auto_refresh_seconds = int(payload.auto_refresh_seconds or 0)
+    user.theme = (payload.theme or "dark").strip().lower() or "dark"
+    user.default_jobs_sort = (payload.default_jobs_sort or "updated_desc").strip() or "updated_desc"
+    user.default_jobs_view = (payload.default_jobs_view or "all").strip().lower() or "all"
+    user.data_retention_days = int(payload.data_retention_days or 0)
     db.add(user)
     db.commit()
     return {"message": "Settings updated"}

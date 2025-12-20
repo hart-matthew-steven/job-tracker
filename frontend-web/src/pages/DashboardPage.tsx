@@ -15,6 +15,8 @@ import {
 
 import { listJobs } from "../api";
 import type { Job } from "../types/api";
+import { useToast } from "../components/ui/ToastProvider";
+import { useSettings } from "../hooks/useSettings";
 
 function startOfWeek(dateLike: string | number | Date) {
   const d = new Date(dateLike);
@@ -43,6 +45,8 @@ export default function DashboardPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const toast = useToast();
+  const { settings } = useSettings();
 
   useEffect(() => {
     refresh();
@@ -54,15 +58,30 @@ export default function DashboardPage() {
 
     try {
       const data = await listJobs(); // ✅ uses api.js helper (adds Authorization)
-      setJobs(Array.isArray(data) ? (data as Job[]) : []);
+      const list0 = Array.isArray(data) ? (data as Job[]) : [];
+      const retentionDays = Math.max(0, Number(settings?.dataRetentionDays ?? 0) || 0);
+      const cutoff = retentionDays ? Date.now() - retentionDays * 24 * 60 * 60 * 1000 : 0;
+      const list =
+        cutoff > 0
+          ? list0.filter((j) => {
+              const dateLike = j.last_activity_at ?? j.applied_date ?? j.created_at ?? null;
+              const t = dateLike ? new Date(dateLike).getTime() : NaN;
+              if (!Number.isFinite(t)) return true;
+              return t >= cutoff;
+            })
+          : list0;
+      setJobs(list);
     } catch (e) {
       const msg = (e as { message?: string } | null)?.message ?? "Failed to load jobs";
 
       // If api.js logged you out (401), give a clearer hint
       if (String(msg).toLowerCase().includes("401")) {
-        setError("Your session expired. Please log in again.");
+        const m2 = "Your session expired. Please log in again.";
+        setError(m2);
+        toast.error(m2, "Dashboard");
       } else {
         setError(msg);
+        toast.error(msg, "Dashboard");
       }
 
       setJobs([]);

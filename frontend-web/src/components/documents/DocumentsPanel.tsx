@@ -11,6 +11,7 @@ import {
 
 import DocumentSection from "./DocumentSection";
 import DocRow from "./DocRow";
+import { useToast } from "../ui/ToastProvider";
 
 type DocType = { key: string; label: string; multiple: boolean };
 
@@ -46,6 +47,7 @@ export default function DocumentsPanel({ jobId, onActivityChange }: Props) {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const toast = useToast();
 
   const [inputKey, setInputKey] = useState(0);
   const [activeDocId, setActiveDocId] = useState<number | null>(null);
@@ -79,7 +81,9 @@ export default function DocumentsPanel({ jobId, onActivityChange }: Props) {
     } catch (e) {
       if (refreshSeqRef.current !== mySeq) return;
       const err = e as { message?: string } | null;
-      setError(err?.message ?? "Failed to load documents");
+      const msg = err?.message ?? "Failed to load documents";
+      setError(msg);
+      toast.error(msg, "Documents");
     }
   }
 
@@ -107,7 +111,9 @@ export default function DocumentsPanel({ jobId, onActivityChange }: Props) {
     setError("");
 
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      setError("File must be 5 MB or smaller.");
+      const msg = "File must be 5 MB or smaller.";
+      setError(msg);
+      toast.error(msg, "Documents");
       return;
     }
 
@@ -152,6 +158,9 @@ export default function DocumentsPanel({ jobId, onActivityChange }: Props) {
         ];
       });
 
+      // Timeline should reflect that a document was added immediately (presign created DB row).
+      onActivityChange?.(new Date().toISOString());
+
       // 2) upload to S3
       await uploadToS3PresignedUrl(uploadUrl, file);
 
@@ -169,9 +178,12 @@ export default function DocumentsPanel({ jobId, onActivityChange }: Props) {
 
       // reset file input so same file can be selected again
       setInputKey((k) => k + 1);
+      toast.success("Upload complete.", "Documents");
     } catch (e) {
       const err = e as { message?: string } | null;
-      setError(err?.message ?? "Upload failed");
+      const msg = err?.message ?? "Upload failed";
+      setError(msg);
+      toast.error(msg, "Documents");
       // If presign created a pending doc row but upload failed, refresh so UI matches server state
       await refresh().catch(() => {});
     } finally {
@@ -193,7 +205,9 @@ export default function DocumentsPanel({ jobId, onActivityChange }: Props) {
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (e) {
       const err = e as { message?: string } | null;
-      setError(err?.message ?? "Download failed");
+      const msg = err?.message ?? "Download failed";
+      setError(msg);
+      toast.error(msg, "Documents");
     } finally {
       setBusy(false);
       setActiveDocId(null);
@@ -214,9 +228,12 @@ export default function DocumentsPanel({ jobId, onActivityChange }: Props) {
 
       await refresh();
       onActivityChange?.(new Date().toISOString());
+      toast.success("Document deleted.", "Documents");
     } catch (e) {
       const err = e as { message?: string } | null;
-      setError(err?.message ?? "Delete failed");
+      const msg = err?.message ?? "Delete failed";
+      setError(msg);
+      toast.error(msg, "Documents");
       await refresh().catch(() => {});
     } finally {
       setBusy(false);

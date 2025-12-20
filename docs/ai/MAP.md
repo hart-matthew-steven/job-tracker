@@ -6,9 +6,19 @@ Update it whenever key entry points or folder structure changes.
 
 ## Frontend (`frontend-web/`)
 - Entry: `frontend-web/src/main.tsx`
-- App shell: `frontend-web/src/App.tsx`
-- API client: (add path once confirmed)
-- Pages/Routes: (add path once confirmed)
+- App routes: `frontend-web/src/App.tsx`
+- API client: `frontend-web/src/api.ts`
+- Routes constants: `frontend-web/src/routes/paths.ts`
+- Pages:
+  - Auth: `frontend-web/src/pages/auth/*`
+  - Core: `frontend-web/src/pages/DashboardPage.tsx`, `frontend-web/src/pages/JobsPage.tsx`
+  - Account: `frontend-web/src/pages/account/index.tsx`
+- UI building blocks:
+  - Layout shell: `frontend-web/src/components/layout/AppShell.tsx`
+  - Toasts: `frontend-web/src/components/ui/ToastProvider.tsx`
+  - Modal: `frontend-web/src/components/ui/Modal.tsx`
+- Jobs page submodules: `frontend-web/src/pages/jobs/*`
+- Frontend tests: `frontend-web/src/**/*.test.tsx` (Vitest)
 
 ## Backend (`backend/`)
 - Entry: `backend/app/main.py` (expected)
@@ -17,6 +27,7 @@ Update it whenever key entry points or folder structure changes.
 - Core (auth/config/db): `backend/app/core/` (expected)
 - Models: `backend/app/models/` (expected)
 - Schemas: `backend/app/schemas/` (expected)
+- Backend tests: `backend/tests/` (pytest)
 
 ## Architecture Docs
 - Overview: `docs/architecture/overview.md`

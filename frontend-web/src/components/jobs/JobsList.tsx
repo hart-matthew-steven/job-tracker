@@ -54,8 +54,8 @@ export default function JobsList({ jobs, selectedJobId, onSelectJob }: Props) {
             className={[
               "w-full text-left rounded-xl border px-4 py-4 transition cursor-pointer",
               isSelected
-                ? "bg-slate-800/80 border-slate-600"
-                : "bg-slate-900/50 border-slate-800 hover:bg-slate-900/80",
+                ? "bg-slate-200 border-slate-300 dark:bg-slate-800/80 dark:border-slate-600"
+                : "bg-white border-slate-200 hover:bg-slate-50 dark:bg-slate-900/50 dark:border-slate-800 dark:hover:bg-slate-900/80",
             ].join(" ")}
           >
             <div className="flex items-center gap-2">
@@ -63,14 +63,14 @@ export default function JobsList({ jobs, selectedJobId, onSelectJob }: Props) {
                 className={`h-2.5 w-2.5 rounded-full ${dotColor} animate-pulse`}
                 title="Last activity indicator"
               />
-              <span className="font-semibold">
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
                 {job.company_name} — {job.job_title}
               </span>
             </div>
 
             {job.last_activity_at && (
-              <div className="mt-2 text-xs text-slate-400">
-                <span className="text-slate-500">Last activity:</span>{" "}
+              <div className="mt-2 text-xs text-slate-600 dark:text-slate-400">
+                <span className="text-slate-500 dark:text-slate-500">Last activity:</span>{" "}
                 {fmtDateTime(job.last_activity_at)}
               </div>
             )}

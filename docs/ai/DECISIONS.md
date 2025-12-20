@@ -63,3 +63,55 @@ Record decisions that affect structure or long-term direction.
 - Rationale: Keeps a single-user settings surface area small and avoids separate settings tables prematurely.
 - Consequences:
   - Future expansion may warrant a dedicated settings table/schema if preferences grow.
+
+---
+
+## 2025-12-19 — Tailwind v4 dark mode uses class-based variant
+- Decision: Configure Tailwind v4 `dark:` to follow the `.dark` class (not `prefers-color-scheme`) using `@custom-variant` in `frontend-web/src/index.css`.
+- Rationale: Enables app-controlled theme switching (dark/light/system) without relying on OS theme.
+- Consequences:
+  - Theme changes apply immediately when toggling `.dark` on `<html>`.
+
+---
+
+## 2025-12-19 — Phase 4 refactor approach: extract modules + shared UI class helpers
+- Decision: Refactor large frontend pages by extracting pure helpers and presentational components into colocated modules (e.g. `frontend-web/src/pages/jobs/*`). Introduce a tiny shared `frontend-web/src/styles/ui.ts` for repeated Tailwind class strings.
+- Rationale: Shrinks large files, reduces duplication, and keeps behavior stable by leaving orchestration/state in the original page while moving UI chunks out.
+- Consequences:
+  - New modules are intentionally “dumb”/presentational; page owns state.
+  - Styling changes are consolidated via shared class constants (still Tailwind; no new deps).
+
+---
+
+## 2025-12-19 — Backend job ownership helpers centralized
+- Decision: Centralize repeated job ownership lookup and tag normalization/tag replacement helpers in `backend/app/services/jobs.py` and import them in jobs-related routers.
+- Rationale: Removes duplication across routers and keeps route modules thinner and more consistent.
+- Consequences:
+  - Routers share a single `get_job_for_user(...)` behavior (404 message/shape remains consistent).
+
+---
+
+## 2025-12-19 — Backend auth + documents route helpers extracted into services
+- Decision: Extract refresh token/cookie helpers into `backend/app/services/refresh_tokens.py` and document presign validation/replacement helpers into `backend/app/services/documents.py`.
+- Rationale: Keep route modules focused on HTTP orchestration and reuse shared policy/validation logic.
+- Consequences:
+  - Auth routes call shared functions for refresh rotation and cookie handling (behavior unchanged).
+  - Document presign endpoint uses shared validation/limits and single-doc replacement logic (behavior unchanged).
+
+---
+
+## 2025-12-19 — Backend standard error response envelope
+- Decision: Add global exception handlers in `backend/app/main.py` so API errors follow the standard `{error, message, details?}` contract documented in `docs/api/error-format.md`.
+- Rationale: Makes frontend error handling consistent and enables stable tests against API error responses.
+- Consequences:
+  - `HTTPException` and request validation errors are consistently shaped.
+  - Tests can assert stable error codes (e.g., `NOT_FOUND`, `UNAUTHORIZED`, `VALIDATION_ERROR`).
+
+---
+
+## 2025-12-19 — Testing strategy: mock API boundaries, avoid UI snapshots
+- Decision: Frontend tests use Vitest + React Testing Library and mock `frontend-web/src/api.ts` rather than snapshot testing or deep component implementation assertions.
+- Rationale: Keeps tests resilient while still validating critical user flows and error handling.
+- Consequences:
+  - Most frontend tests assert on visible text, routing, and API call arguments.
+  - Backend tests use pytest with an in-memory SQLite harness for fast, isolated runs.

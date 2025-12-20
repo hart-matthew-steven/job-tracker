@@ -17,8 +17,14 @@ export type UserMeOut = {
   email_verified_at?: string | null;
 };
 
-export type UserSettingsOut = { auto_refresh_seconds: number };
-export type UpdateSettingsIn = { auto_refresh_seconds: number };
+export type UserSettingsOut = {
+  auto_refresh_seconds: number;
+  theme: string;
+  default_jobs_sort: string;
+  default_jobs_view: string;
+  data_retention_days: number;
+};
+export type UpdateSettingsIn = UserSettingsOut;
 export type ChangePasswordIn = { current_password: string; new_password: string };
 
 // -------- Jobs / Notes / Documents (minimal shapes used by UI) --------
@@ -33,6 +39,7 @@ export type Job = {
   last_activity_at?: string | null;
   created_at?: string;
   updated_at?: string;
+  tags?: string[];
 };
 
 export type CreateJobIn = {
@@ -40,9 +47,14 @@ export type CreateJobIn = {
   job_title: string;
   location?: string | null;
   job_url?: string | null;
+  tags?: string[];
 };
 
-export type PatchJobIn = Partial<CreateJobIn> & { status?: string | null; applied_date?: string | null };
+export type PatchJobIn = Partial<CreateJobIn> & {
+  status?: string | null;
+  applied_date?: string | null;
+  tags?: string[];
+};
 
 export type Note = {
   id: number;
@@ -68,4 +80,57 @@ export type PresignUploadIn = {
 };
 export type PresignUploadOut = { upload_url: string } & Record<string, unknown>;
 export type ConfirmUploadIn = Record<string, unknown>;
+
+// -------- Saved views --------
+export type SavedView = {
+  id: number;
+  name: string;
+  data: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateSavedViewIn = {
+  name: string;
+  data: Record<string, unknown>;
+};
+
+export type PatchSavedViewIn = Partial<CreateSavedViewIn>;
+
+// -------- Job activity --------
+export type JobActivity = {
+  id: number;
+  application_id: number;
+  type: string;
+  message?: string | null;
+  data?: Record<string, unknown> | null;
+  created_at: string;
+};
+
+// -------- Interviews --------
+export type JobInterview = {
+  id: number;
+  application_id: number;
+  scheduled_at: string;
+  stage?: string | null;
+  kind?: string | null;
+  location?: string | null;
+  interviewer?: string | null;
+  status: string;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateInterviewIn = {
+  scheduled_at: string;
+  stage?: string | null;
+  kind?: string | null;
+  location?: string | null;
+  interviewer?: string | null;
+  status?: string | null;
+  notes?: string | null;
+};
+
+export type PatchInterviewIn = Partial<CreateInterviewIn>;
 
