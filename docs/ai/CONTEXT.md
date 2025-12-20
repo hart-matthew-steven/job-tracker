@@ -13,10 +13,11 @@ Primary goals:
 
 ## Tech Stack
 ### Frontend (`frontend-web/`)
-- React + Vite (JavaScript)
+- React + Vite (TypeScript)
 - Tailwind CSS
 - React Router
-- Central API client in `frontend-web/src/api.js`
+- Central API client in `frontend-web/src/api.ts`
+- Tests: Vitest + React Testing Library
 
 ### Backend (`backend/`)
 - FastAPI
@@ -25,6 +26,7 @@ Primary goals:
 - JWT access tokens (Bearer)
 - Refresh tokens stored in DB, delivered via HttpOnly cookie
 - AWS SDK: `boto3` (used for SES and S3-related workflows)
+- Tests: pytest
 
 ## AWS / External Services (current)
 - **SES**: email verification delivery via `boto3` (provider default)
@@ -33,7 +35,7 @@ Primary goals:
 ## Intended Future Direction (high-level)
 - iOS app (separate client, likely `frontend-ios/` when introduced)
 - AWS hardening and production infrastructure (explicitly staged; do not start ngrok/Lambda/scan pipeline work unless requested)
-- Continued refactors: improve maintainability, reduce duplication, add typed client models (TypeScript migration is planned)
+- Continued refactors: improve maintainability, reduce duplication, keep tests comprehensive
 
 ## Key Flows
 ### Auth + Email verification

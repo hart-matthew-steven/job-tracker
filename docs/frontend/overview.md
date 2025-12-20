@@ -8,6 +8,7 @@ This document describes the frontend structure and conventions at a high level.
 
 - React + Vite
 - TypeScript
+- Vitest + React Testing Library
 
 ---
 
@@ -48,6 +49,19 @@ Notable hooks:
 - Prefer predictable patterns over clever abstraction
 - Do not scatter API calls across unrelated components
 - Preserve UI behavior during refactors unless explicitly changing UX
+
+---
+
+## Tests
+
+Frontend tests live alongside code as `*.test.tsx` and are run via Vitest:
+
+- `cd frontend-web && npm test`
+
+The suite focuses on:
+- user flows (auth, jobs, documents, settings)
+- API boundary behavior (mocked `src/api.ts`)
+- toast/error handling
 
 ---
 
