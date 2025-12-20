@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, ConfigDict, field_serializer
 from zoneinfo import ZoneInfo
 from typing import Optional
 
@@ -21,5 +21,4 @@ class NoteOut(BaseModel):
             return None
         return dt.astimezone(ET)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

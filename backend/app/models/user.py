@@ -14,6 +14,14 @@ class User(Base):
     name = Column(String(100), nullable=True)
     # User preference: Jobs auto-refresh interval in seconds. 0 = off.
     auto_refresh_seconds = Column(Integer, nullable=False, server_default="0")
+    # User preference: appearance theme (dark/light/system). UI currently uses dark, but store anyway.
+    theme = Column(String(20), nullable=False, server_default="dark")
+    # User preference: default job list sort mode (e.g. updated_desc/company_asc/status_asc)
+    default_jobs_sort = Column(String(30), nullable=False, server_default="updated_desc")
+    # User preference: default jobs "view" chip (all/active/needs_followup)
+    default_jobs_view = Column(String(30), nullable=False, server_default="all")
+    # User preference: data retention in days (0 = keep forever)
+    data_retention_days = Column(Integer, nullable=False, server_default="0")
     password_hash = Column(String(255), nullable=False)
 
     is_active = Column(Boolean, nullable=False, server_default="true")

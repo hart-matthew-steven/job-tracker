@@ -55,3 +55,22 @@ class JobApplication(Base):
         cascade="all, delete-orphan",
         order_by="desc(JobDocument.created_at)",
     )
+
+    # Tags (one-to-many)
+    tag_rows = relationship(
+        "JobApplicationTag",
+        back_populates="application",
+        cascade="all, delete-orphan",
+        order_by="asc(JobApplicationTag.tag)",
+        lazy="selectin",
+    )
+
+    @property
+    def tags(self) -> list[str]:
+        rows = getattr(self, "tag_rows", None) or []
+        out: list[str] = []
+        for r in rows:
+            t = getattr(r, "tag", None)
+            if isinstance(t, str) and t:
+                out.append(t)
+        return out

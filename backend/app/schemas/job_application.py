@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
 from typing import Optional, List
 from zoneinfo import ZoneInfo
 
@@ -14,6 +14,7 @@ class JobApplicationCreate(BaseModel):
     status: str = "applied"
     applied_date: Optional[date] = None
     job_url: Optional[str] = None
+    tags: Optional[List[str]] = None
 
 
 class JobApplicationOut(BaseModel):
@@ -27,6 +28,27 @@ class JobApplicationOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_activity_at: Optional[datetime] = None
+    tags: List[str] = []
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def coerce_tags(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, list):
+            out: list[str] = []
+            for item in v:
+                if item is None:
+                    continue
+                if isinstance(item, str):
+                    out.append(item)
+                    continue
+                tag = getattr(item, "tag", None)
+                if tag is None:
+                    continue
+                out.append(str(tag))
+            return out
+        return v
 
     @field_serializer("created_at", "updated_at", "last_activity_at")
     def serialize_dt(self, dt: Optional[datetime]):
@@ -34,8 +56,7 @@ class JobApplicationOut(BaseModel):
                 return None
         return dt.astimezone(ET)
     
-    class Config:
-        from_attributes = True  # pydantic v2
+    model_config = ConfigDict(from_attributes=True)
     
 
 class JobApplicationDetailOut(JobApplicationOut):
