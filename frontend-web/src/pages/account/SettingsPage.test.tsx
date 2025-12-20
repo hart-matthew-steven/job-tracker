@@ -72,10 +72,14 @@ describe("SettingsPage", () => {
     const autoRefreshSelect = selects.find((s) => (s as HTMLSelectElement).value === "0") as HTMLSelectElement;
     expect(autoRefreshSelect).toBeTruthy();
 
+    // In CI, the page can render before settings finish loading (controls are disabled).
+    await waitFor(() => expect(autoRefreshSelect).toBeEnabled());
+
     await user.selectOptions(autoRefreshSelect, "10");
 
     // Error is rendered both inline and as toast; just assert it exists.
-    expect((await screen.findAllByText("nope")).length).toBeGreaterThan(0);
+    await waitFor(() => expect(api.updateMySettings).toHaveBeenCalled());
+    expect((await screen.findAllByText(/nope/i)).length).toBeGreaterThan(0);
   });
 
   it("updates default jobs sort + view and calls updateMySettings", async () => {
