@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ToastProvider } from "../../components/ui/ToastProvider";
@@ -103,7 +103,11 @@ describe("SettingsPage", () => {
     await screen.findByText("Preferences");
 
     const input = screen.getByLabelText("Hide jobs after (days)") as HTMLInputElement;
-    await user.clear(input);
+    // In CI, settings may still be loading when the element first appears (disabled => not editable).
+    await waitFor(() => expect(input).toBeEnabled());
+    await user.click(input);
+    // user.clear can be flaky on number inputs across environments; do a robust clear.
+    await user.keyboard("{Control>}{A}{/Control}{Backspace}");
     await user.type(input, "365");
 
     // last call should include data_retention_days: 365
