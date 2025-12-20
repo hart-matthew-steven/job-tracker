@@ -6,12 +6,12 @@ import { useAuth } from "../../auth/AuthProvider";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useSettings } from "../../hooks/useSettings";
 import { changePassword } from "../../api";
-import { useToast } from "../../components/ui/ToastProvider";
+import { useToast } from "../../components/ui/toast";
 
 type PageShellProps = {
-  title: string;
-  subtitle?: string;
-  children: React.ReactNode;
+    title: string;
+    subtitle?: string;
+    children: React.ReactNode;
 };
 
 function PageShell({ title, subtitle, children }: PageShellProps) {
@@ -28,7 +28,7 @@ function PageShell({ title, subtitle, children }: PageShellProps) {
 
 export function ProfilePage() {
     const { user, loading, error, reload } = useCurrentUser();
-  const toast = useToast();
+    const toast = useToast();
 
     const lastErrorRef = useRef<string>("");
     useEffect(() => {
@@ -82,7 +82,7 @@ export function ProfilePage() {
 
 export function SettingsPage() {
     const { settings, setAutoRefreshSeconds, setTheme, setDefaultJobsSort, setDefaultJobsView, setDataRetentionDays, loading, error } = useSettings();
-  const toast = useToast();
+    const toast = useToast();
 
     const lastErrorRef = useRef<string>("");
     useEffect(() => {
@@ -146,7 +146,9 @@ export function SettingsPage() {
                                         try {
                                             await setTheme(next);
                                             toast.success("Settings saved.", "Settings");
-                                        } catch {}
+                                        } catch {
+                                            // error toast is handled by the `error` effect above
+                                        }
                                     })();
                                 }}
                                 disabled={loading}
@@ -171,7 +173,9 @@ export function SettingsPage() {
                                         try {
                                             await setDefaultJobsSort(next);
                                             toast.success("Settings saved.", "Settings");
-                                        } catch {}
+                                        } catch {
+                                            // error toast is handled by the `error` effect above
+                                        }
                                     })();
                                 }}
                                 disabled={loading}
@@ -195,7 +199,9 @@ export function SettingsPage() {
                                         try {
                                             await setDefaultJobsView(next);
                                             toast.success("Settings saved.", "Settings");
-                                        } catch {}
+                                        } catch {
+                                            // error toast is handled by the `error` effect above
+                                        }
                                     })();
                                 }}
                                 disabled={loading}
@@ -226,7 +232,9 @@ export function SettingsPage() {
                                         try {
                                             await setDataRetentionDays(next);
                                             toast.success("Settings saved.", "Settings");
-                                        } catch {}
+                                        } catch {
+                                            // error toast is handled by the `error` effect above
+                                        }
                                     })();
                                 }}
                                 disabled={loading}
@@ -248,7 +256,7 @@ export function SettingsPage() {
 export function ChangePasswordPage() {
     const { logout } = useAuth();
     const nav = useNavigate();
-  const toast = useToast();
+    const toast = useToast();
     const [currentPassword, setCurrentPassword] = useState("");
     const [newPassword, setNewPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");

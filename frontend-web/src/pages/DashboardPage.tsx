@@ -1,5 +1,5 @@
 // src/pages/DashboardPage.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart,
   Bar,
@@ -15,7 +15,7 @@ import {
 
 import { listJobs } from "../api";
 import type { Job } from "../types/api";
-import { useToast } from "../components/ui/ToastProvider";
+import { useToast } from "../components/ui/toast";
 import { useSettings } from "../hooks/useSettings";
 
 function startOfWeek(dateLike: string | number | Date) {
@@ -48,11 +48,7 @@ export default function DashboardPage() {
   const toast = useToast();
   const { settings } = useSettings();
 
-  useEffect(() => {
-    refresh();
-  }, []);
-
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setError("");
     setLoading(true);
 
@@ -88,7 +84,11 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [settings?.dataRetentionDays, toast]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   // Donut: pipeline counts by status
   const pipeline = useMemo(() => {

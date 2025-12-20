@@ -11,7 +11,7 @@ import {
 
 import DocumentSection from "./DocumentSection";
 import DocRow from "./DocRow";
-import { useToast } from "../ui/ToastProvider";
+import { useToast } from "../ui/toast";
 
 type DocType = { key: string; label: string; multiple: boolean };
 

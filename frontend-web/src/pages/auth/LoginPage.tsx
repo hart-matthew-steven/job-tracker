@@ -5,7 +5,7 @@ import type { FormEvent } from "react";
 
 import { loginUser } from "../../api";
 import { useAuth } from "../../auth/AuthProvider";
-import { useToast } from "../../components/ui/ToastProvider";
+import { useToast } from "../../components/ui/toast";
 
 function safeNext(nextRaw: string | null) {
   const v = (nextRaw || "").trim();

@@ -41,11 +41,11 @@ function normalizeTag(raw: unknown): string {
 }
 
 export default function JobDetailsCard({ job, onStatusChange, onTagsChange }: Props) {
-  if (!job) return null;
-  const job2 = job as JobWithActivity;
+  const job2 = job as JobWithActivity | null;
 
   const tags = useMemo(() => {
-    const raw = Array.isArray(job.tags) ? job.tags : [];
+    if (!job2) return [];
+    const raw = Array.isArray(job2.tags) ? job2.tags : [];
     const out: string[] = [];
     for (const t of raw) {
       const s = normalizeTag(t);
@@ -53,10 +53,12 @@ export default function JobDetailsCard({ job, onStatusChange, onTagsChange }: Pr
       if (!out.includes(s)) out.push(s);
     }
     return out;
-  }, [job.tags]);
+  }, [job2]);
 
   const [tagText, setTagText] = useState("");
   const [tagsBusy, setTagsBusy] = useState(false);
+
+  if (!job2) return null;
 
   async function addTag() {
     if (!onTagsChange) return;
@@ -89,20 +91,20 @@ export default function JobDetailsCard({ job, onStatusChange, onTagsChange }: Pr
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
       <div className="text-2xl font-bold">
-        {job.company_name} — {job.job_title}
+        {job2.company_name} — {job2.job_title}
       </div>
 
-      {job.location && (
+      {job2.location && (
         <div className="mt-2 text-slate-300 flex items-center gap-2">
           <span>📍</span>
-          <span>{job.location}</span>
+          <span>{job2.location}</span>
         </div>
       )}
 
-      {job.job_url && (
+      {job2.job_url && (
         <div className="mt-2">
           <a
-            href={job.job_url}
+            href={job2.job_url}
             target="_blank"
             rel="noreferrer"
             className="text-blue-400 hover:text-blue-300 underline cursor-pointer"
@@ -115,7 +117,7 @@ export default function JobDetailsCard({ job, onStatusChange, onTagsChange }: Pr
       <div className="mt-4 text-sm text-slate-300 flex flex-wrap gap-x-6 gap-y-1">
         <div>
           <span className="text-slate-500">Applied:</span>{" "}
-          {fmtDateTime(getAppliedDate(job))}
+          {fmtDateTime(getAppliedDate(job2))}
         </div>
         <div>
           <span className="text-slate-500">Last activity:</span>{" "}
@@ -127,7 +129,7 @@ export default function JobDetailsCard({ job, onStatusChange, onTagsChange }: Pr
         <div className="text-sm text-slate-400">Status</div>
 
         <select
-          value={(job.status ?? "applied").toLowerCase()}
+          value={(job2.status ?? "applied").toLowerCase()}
           onChange={(e) => onStatusChange?.(e.target.value)}
           className="rounded-lg bg-slate-800/70 border border-slate-700 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-500 cursor-pointer"
         >

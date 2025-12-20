@@ -4,7 +4,7 @@ import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
 import type { Params } from "react-router-dom";
 
 import { resendVerification, verifyEmail } from "../../api";
-import { useToast } from "../../components/ui/ToastProvider";
+import { useToast } from "../../components/ui/toast";
 
 function safeNext(nextRaw: string | null) {
   const v = (nextRaw || "").trim();
@@ -67,7 +67,7 @@ export default function VerifyEmailPage() {
     return () => {
       cancelled = true;
     };
-  }, [token, nav, next]);
+  }, [token, nav, next, toast]);
 
   async function onResend() {
     setError("");
