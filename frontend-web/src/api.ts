@@ -18,6 +18,13 @@ import type {
   UpdateSettingsIn,
   UserMeOut,
   UserSettingsOut,
+  CreateSavedViewIn,
+  PatchSavedViewIn,
+  SavedView,
+  JobActivity,
+  CreateInterviewIn,
+  JobInterview,
+  PatchInterviewIn,
 } from "./types/api";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://matts-macbook.local:8000").replace(
@@ -277,10 +284,60 @@ export function updateMySettings(payload: UpdateSettingsIn): Promise<MessageOut>
 }
 
 /** -------------------
+ * Saved views
+ * ------------------- */
+export function listSavedViews(): Promise<SavedView[]> {
+  return requestJson<SavedView[]>(`/saved-views`);
+}
+
+export function createSavedView(payload: CreateSavedViewIn): Promise<SavedView> {
+  return requestJson<SavedView>(`/saved-views`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function patchSavedView(viewId: number | string, payload: PatchSavedViewIn): Promise<SavedView> {
+  return requestJson<SavedView>(`/saved-views/${viewId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteSavedView(viewId: number | string): Promise<MessageOut> {
+  return requestJson<MessageOut>(`/saved-views/${viewId}`, { method: "DELETE" });
+}
+
+/** -------------------
  * Jobs
  * ------------------- */
-export function listJobs(): Promise<Job[]> {
-  return requestJson<Job[]>(`/jobs`);
+export function listJobs(
+  opts: { q?: string; tag_q?: string; tag?: string | string[]; status?: string | string[] } = {}
+): Promise<Job[]> {
+  const params = new URLSearchParams();
+
+  const q = String(opts.q ?? "").trim();
+  if (q) params.set("q", q);
+
+  const tagQ = String(opts.tag_q ?? "").trim();
+  if (tagQ) params.set("tag_q", tagQ);
+
+  const tagsRaw = Array.isArray(opts.tag) ? opts.tag : opts.tag ? [opts.tag] : [];
+  for (const t of tagsRaw) {
+    const v = String(t ?? "").trim();
+    if (v) params.append("tag", v);
+  }
+
+  const statusesRaw = Array.isArray(opts.status) ? opts.status : opts.status ? [opts.status] : [];
+  for (const s of statusesRaw) {
+    const v = String(s ?? "").trim();
+    if (v) params.append("status", v);
+  }
+
+  const qs = params.toString();
+  return requestJson<Job[]>(`/jobs${qs ? `?${qs}` : ""}`);
 }
 
 export function getJob(jobId: number | string): Promise<Job> {
@@ -301,6 +358,45 @@ export function patchJob(jobId: number | string, payload: PatchJobIn): Promise<J
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+/** -------------------
+ * Job activity
+ * ------------------- */
+export function listJobActivity(jobId: number | string, opts: { limit?: number } = {}): Promise<JobActivity[]> {
+  const limit = Math.max(1, Math.min(Number(opts.limit ?? 50) || 50, 200));
+  return requestJson<JobActivity[]>(`/jobs/${jobId}/activity?limit=${encodeURIComponent(String(limit))}`);
+}
+
+/** -------------------
+ * Interviews
+ * ------------------- */
+export function listInterviews(jobId: number | string): Promise<JobInterview[]> {
+  return requestJson<JobInterview[]>(`/jobs/${jobId}/interviews`);
+}
+
+export function createInterview(jobId: number | string, payload: CreateInterviewIn): Promise<JobInterview> {
+  return requestJson<JobInterview>(`/jobs/${jobId}/interviews`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function patchInterview(
+  jobId: number | string,
+  interviewId: number | string,
+  payload: PatchInterviewIn
+): Promise<JobInterview> {
+  return requestJson<JobInterview>(`/jobs/${jobId}/interviews/${interviewId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteInterview(jobId: number | string, interviewId: number | string): Promise<MessageOut> {
+  return requestJson<MessageOut>(`/jobs/${jobId}/interviews/${interviewId}`, { method: "DELETE" });
 }
 
 /** -------------------

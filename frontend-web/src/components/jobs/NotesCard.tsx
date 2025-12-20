@@ -72,7 +72,7 @@ export default function NotesCard({ notes, noteText, setNoteText, onAddNote, onD
 
         <button
           onClick={onAddNote}
-          className="rounded-lg bg-green-600 hover:bg-green-500 transition px-5 py-2 font-semibold cursor-pointer"
+          className="rounded-lg px-5 py-2 text-sm font-semibold transition border border-slate-700 bg-slate-900/60 text-slate-200 hover:bg-slate-900 cursor-pointer"
         >
           Add
         </button>

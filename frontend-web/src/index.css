@@ -1,8 +1,19 @@
 @import "tailwindcss";
+
+/* Tailwind v4: make `dark:` respond to the `.dark` class (not prefers-color-scheme media). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @layer base {
     button,
     a,
     [role="button"] {
         cursor: pointer;
+    }
+    /* Theme: Tailwind dark mode uses the `dark` class on <html>. */
+    html {
+        color-scheme: light;
+    }
+    html.dark {
+        color-scheme: dark;
     }
 }
