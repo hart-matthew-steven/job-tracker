@@ -20,7 +20,8 @@ def test_single_doc_type_replaces_existing_db_row(client):
         json={"doc_type": "resume", "filename": "resume1.pdf", "content_type": "application/pdf", "size_bytes": 10},
     )
     assert res1.status_code == 200
-    doc1 = res1.json()["document"]
+    # doc1 is implicitly replaced; keep the response call to validate the shape.
+    _ = res1.json()["document"]
 
     res2 = client.post(
         f"/jobs/{job['id']}/documents/presign-upload",

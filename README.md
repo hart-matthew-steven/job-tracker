@@ -135,6 +135,11 @@ Frontend:
     npm test
     npm run dev
 
+CI:
+
+    # GitHub Actions runs these checks on pull requests (and on pushes to main).
+    # Branch protection steps: see docs/ci/github-actions.md
+
 Backend:
 
     cd backend
