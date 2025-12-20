@@ -8,7 +8,7 @@ import JobCard from "../components/jobs/JobCard";
 import TimelineCard from "../components/jobs/TimelineCard";
 import InterviewsCard from "../components/jobs/InterviewsCard";
 import Modal from "../components/ui/Modal";
-import { useToast } from "../components/ui/ToastProvider";
+import { useToast } from "../components/ui/toast";
 
 import { useSettings } from "../hooks/useSettings";
 import SavedViewsModal from "./jobs/SavedViewsModal";
@@ -38,7 +38,6 @@ import {
   hasOpenModal,
   isTypingInInput,
   jobSortKey,
-  matchesJob,
   normalizeStatus,
   safeTime,
   sortJobsCompanyAsc,
@@ -290,15 +289,6 @@ export default function JobsPage() {
       return sortJobsDesc(next);
     });
   }
-
-  const pipelineCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const j of jobs) {
-      const s = normalizeStatus(j);
-      counts[s] = (counts[s] ?? 0) + 1;
-    }
-    return counts;
-  }, [jobs]);
 
   const statusCounts = useMemo(() => {
     const counts: Record<StatusFilterId, number> = {

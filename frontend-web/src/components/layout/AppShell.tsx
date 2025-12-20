@@ -165,7 +165,6 @@ function AccountMenu({ onLogout }: AccountMenuProps) {
 type Props = { onLogout?: () => void | Promise<void> };
 
 export default function AppShell({ onLogout }: Props) {
-  const { user } = useCurrentUser();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const nav = useNavigate();

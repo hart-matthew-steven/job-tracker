@@ -9,6 +9,18 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores(['dist']),
   {
+    // Tests/utilities are not React-refresh boundaries; allow helper exports.
+    files: [
+      "**/*.test.{ts,tsx}",
+      "src/test/**/*.{ts,tsx}",
+      "src/**/__tests__/**/*.{ts,tsx}",
+      "src/**/__mocks__/**/*.{ts,tsx}",
+    ],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  },
+  {
     files: ['**/*.{js,jsx}'],
     extends: [
       js.configs.recommended,

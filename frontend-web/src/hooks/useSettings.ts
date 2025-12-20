@@ -101,9 +101,7 @@ export function useSettings(): UseSettingsResult {
       return () => m.removeEventListener("change", handler);
     } catch {
       // Safari fallback
-      // eslint-disable-next-line deprecation/deprecation
       m.addListener(handler);
-      // eslint-disable-next-line deprecation/deprecation
       return () => m.removeListener(handler);
     }
   }, [settings.theme]);

@@ -4,7 +4,7 @@ import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
 import type { FormEvent } from "react";
 
 import { registerUser, resendVerification } from "../../api";
-import { useToast } from "../../components/ui/ToastProvider";
+import { useToast } from "../../components/ui/toast";
 
 function safeNext(nextRaw: string | null) {
   const v = (nextRaw || "").trim();
