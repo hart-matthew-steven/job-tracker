@@ -77,33 +77,80 @@ Good patterns:
 
 ---
 
-## File Upload Handling & ClamAV
+## File Upload Handling & GuardDuty Malware Protection
 
 Uploaded files are untrusted input and must be isolated and scanned.
 
 ### High-level policy
 A file is not considered "accepted" until:
-1) it is stored in a staging location, and
-2) a ClamAV scan completes successfully, and
-3) metadata is updated to mark the file CLEAN
+1) it is stored in S3, and
+2) AWS GuardDuty Malware Protection for S3 scan completes successfully, and
+3) metadata is updated to mark the file CLEAN (`scan_status=CLEAN`)
 
-### Storage zones (recommended)
-- **Staging (untrusted):** newly uploaded files go here
-- **Clean (trusted):** files promoted after passing scan
-- **Quarantine (optional):** files that fail scan (policy dependent)
+### Implemented architecture (S3 → GuardDuty → EventBridge → Lambda)
+
+    [FE] presign + upload (<=5MB)
+      |
+      v
+    [S3] untrusted object (key includes document_id)
+      |
+      v
+    [GuardDuty Malware Protection for S3] (AWS-managed scan; no file download required)
+      |
+      v
+    [EventBridge] receives GuardDuty finding
+      |
+      v
+    [Lambda: guardduty_scan_forwarder]
+      |
+      | extracts document_id from S3 key
+      | verdict source of truth: S3 object tag GuardDutyMalwareScanStatus
+      | (if verdict not in event, Lambda calls S3 GetObjectTagging)
+      | maps verdict -> CLEAN/INFECTED/ERROR
+      |
+      +--> NO_THREATS_FOUND -> backend callback -> DB scan_status=CLEAN (download allowed)
+      +--> THREATS_FOUND    -> backend callback -> DB scan_status=INFECTED (download blocked)
+      +--> ERROR/UNKNOWN    -> backend callback -> DB scan_status=ERROR (download blocked)
+
+### Security properties
+
+- **AWS-managed scanning:** GuardDuty performs malware scanning without us downloading or processing untrusted files.
+- **No file handling:** The forwarder Lambda never downloads file contents. If the verdict is missing from the event, it only reads **object tags** via `GetObjectTagging`.
+- **Least privilege:** Lambda needs only EventBridge trigger permissions and network access to call the backend callback.
+- **Backend enforcement:** Download endpoints are blocked unless `scan_status == CLEAN`.
+- **Audit trail:** Infected documents remain in the DB with `scan_status=INFECTED`; S3 object remains in place but download is blocked.
+
+### Required IAM (Lambda)
+
+The Lambda forwarder must be able to read object tags when EventBridge does not include them:
+
+- Action: `s3:GetObjectTagging`
+- Resource (scoped to the upload prefix):
+  - `arn:aws:s3:::job-tracker-documents-0407/job-tracker/*`
+
+### Storage model
+- **Single S3 bucket:** all uploaded files go to the same bucket with a key structure that embeds `document_id`.
+- **No quarantine prefix:** GuardDuty marks infected objects but does not move them. Backend blocks downloads based on `scan_status`.
+- **Clean state:** represented by `scan_status=CLEAN` in DB; GuardDuty finding is `NO_THREATS_FOUND`.
 
 ### Scan outcomes
-- CLEAN: file promoted/marked safe; downstream processing allowed
-- REJECTED: file blocked; user receives actionable message; downstream processing forbidden
-- FAILED: scan error; retry policy applied; file remains untrusted until resolved
+- CLEAN: `scan_status=CLEAN`; downstream processing allowed (download enabled)
+- INFECTED: `scan_status=INFECTED`; downstream processing forbidden (download blocked; file remains in S3 for audit)
+- ERROR: `scan_status=ERROR`; scan failed or status unknown; file remains untrusted (download blocked)
 
 ### Operational notes
-- Scanning should occur in an isolated worker/service/container
-- The scanner should have limited permissions:
-  - read from staging
-  - write scan results
-  - (optional) move/promote to clean
-- Never run document parsing or extraction on unscanned files
+- GuardDuty Malware Protection for S3 must be enabled in the AWS account/region.
+- EventBridge rule must be configured to forward GuardDuty findings to the Lambda.
+- No file downloads or ClamAV definitions management required.
+- Lambda is stateless and idempotent (safe for EventBridge retries).
+
+### Secrets: Lambda → backend callback
+
+The callback endpoint is protected by a shared secret header:
+- Header: `x-doc-scan-secret` (preferred) or `x-internal-token` (legacy)
+- Value: `DOC_SCAN_SHARED_SECRET` (backend + Lambda env var)
+
+No secrets are committed to git; they are configured via environment variables.
 
 ---
 

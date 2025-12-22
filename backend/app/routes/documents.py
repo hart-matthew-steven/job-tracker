@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from sqlalchemy.orm import Session
 
@@ -58,24 +59,34 @@ def create_document_presign_upload(
     enforce_pending_upload_limit(db, job.id)
     maybe_replace_single_doc(db, job.id, doc_type)
 
-    result = presign_upload(
-        job_id=job.id,
-        doc_type=doc_type,
-        filename=filename,
-        content_type=payload.content_type,
-    )
-
+    # Create DB row first so we can embed document_id into the S3 key for downstream scanning.
     doc = JobDocument(
         application_id=job.id,
         doc_type=doc_type,
-        s3_key=result.s3_key,
+        # Temporary placeholder, replaced below before commit.
+        s3_key=f"__pending__/{uuid.uuid4()}",
         original_filename=filename,
         content_type=payload.content_type,
         size_bytes=size_bytes,
         status="pending",
         uploaded_at=None,
+        scan_status="PENDING",
+        scan_checked_at=None,
+        scan_message=None,
+        quarantined_s3_key=None,
     )
     db.add(doc)
+    db.flush()  # assign doc.id without committing
+
+    result = presign_upload(
+        job_id=job.id,
+        doc_type=doc_type,
+        filename=filename,
+        content_type=payload.content_type,
+        document_id=doc.id,
+    )
+    doc.s3_key = result.s3_key
+
     db.commit()
     db.refresh(doc)
 
@@ -126,8 +137,9 @@ def get_document_download_url(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Recommended: block downloads until scan passed
-    if getattr(doc, "status", None) and doc.status != "uploaded":
+    # Block downloads until malware scan is clean.
+    scan_status = getattr(doc, "scan_status", None)
+    if scan_status and str(scan_status).upper() != "CLEAN":
         raise HTTPException(status_code=409, detail="Document is not ready to download yet")
 
     return {"download_url": presign_download(doc.s3_key)}
@@ -219,6 +231,7 @@ def confirm_upload(
 
     # Mark confirmed -> scanning (virus scan decides final)
     doc.status = "scanning"
+    doc.scan_status = "PENDING"
     doc.size_bytes = s3_size
     doc.uploaded_at = datetime.now(timezone.utc)
 
@@ -266,20 +279,38 @@ def document_scan_result(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
+    now = datetime.now(timezone.utc)
+
+    # Idempotency: once CLEAN/INFECTED, keep it stable (safe for retries).
+    existing = str(getattr(doc, "scan_status", "PENDING") or "PENDING").upper()
+    if existing in {"CLEAN", "INFECTED"}:
+        # Allow a "fill-in" for quarantined key if the first attempt quarantined but the callback retried.
+        if existing == "INFECTED" and getattr(payload, "quarantined_s3_key", None) and not getattr(doc, "quarantined_s3_key", None):
+            doc.quarantined_s3_key = payload.quarantined_s3_key
+            db.commit()
+        return {"ok": True, "document_id": doc.id, "scan_status": existing, "status": doc.status}
+
     if payload.result == "clean":
+        doc.scan_status = "CLEAN"
+        doc.scan_checked_at = now
+        doc.scan_message = payload.detail
         doc.status = "uploaded"
-        doc.uploaded_at = doc.uploaded_at or datetime.now(timezone.utc)
-        job.last_activity_at = datetime.now(timezone.utc)
+        doc.uploaded_at = doc.uploaded_at or now
+        job.last_activity_at = now
 
     elif payload.result == "infected":
+        doc.scan_status = "INFECTED"
+        doc.scan_checked_at = now
+        doc.scan_message = payload.detail
+        if getattr(payload, "quarantined_s3_key", None):
+            doc.quarantined_s3_key = payload.quarantined_s3_key
         doc.status = "infected"
-        try:
-            delete_object(doc.s3_key)
-        except Exception:
-            pass
 
     else:
+        doc.scan_status = "ERROR"
+        doc.scan_checked_at = now
+        doc.scan_message = payload.detail
         doc.status = "failed"
 
     db.commit()
-    return {"ok": True, "document_id": doc.id, "status": doc.status}
+    return {"ok": True, "document_id": doc.id, "scan_status": doc.scan_status, "status": doc.status}

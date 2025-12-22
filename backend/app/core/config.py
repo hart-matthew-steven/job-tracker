@@ -72,9 +72,13 @@ class Settings:
     SMTP_USE_SSL: bool = str_to_bool(os.getenv("SMTP_USE_SSL", "false"), default=False)
 
     # Email provider
-    # - "ses": AWS SES via boto3 (recommended for prod on AWS)
-    # - "smtp": generic SMTP (useful for local/dev)
-    EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "ses").strip().lower()
+    # Supported providers:
+    # - "resend" (default)
+    # - "ses"
+    # - "gmail"
+    # Legacy alias:
+    # - "smtp" -> treated as "gmail" (handled in app.services.email)
+    EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "resend").strip().lower()
 
     # Public backend base URL (ngrok later) - used for server-side links if needed
     PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
@@ -94,9 +98,11 @@ class Settings:
     S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "")
     S3_PREFIX = os.getenv("S3_PREFIX", "")
 
-    # SES
-    SES_REGION = os.getenv("SES_REGION", "")  # defaults to AWS_REGION if unset
-    SES_FROM_EMAIL = os.getenv("SES_FROM_EMAIL", "")  # must be verified in SES
+    # Email (provider-specific)
+    # Used by: ses, resend
+    FROM_EMAIL = os.getenv("FROM_EMAIL", "")
+    # Used by: resend
+    RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 
     @property
     def database_url(self) -> str:

@@ -29,6 +29,13 @@ class JobDocument(Base):
     )
     uploaded_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Malware scanning (GuardDuty Malware Protection for S3)
+    # PENDING | CLEAN | INFECTED | ERROR
+    scan_status = Column(String(20), nullable=False, server_default="PENDING")
+    scan_checked_at = Column(DateTime(timezone=True), nullable=True)
+    scan_message = Column(String(1024), nullable=True)
+    quarantined_s3_key = Column(String(512), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     application = relationship("JobApplication", back_populates="documents")

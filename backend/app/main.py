@@ -15,6 +15,7 @@ from app.routes.users import router as users_router
 from app.routes.saved_views import router as saved_views_router
 from app.routes.activity import router as activity_router
 from app.routes.interviews import router as interviews_router
+from app.routes.internal_documents import router as internal_documents_router
 
 require_jwt_secret()
 
@@ -99,6 +100,7 @@ app.include_router(users_router)
 app.include_router(saved_views_router)
 app.include_router(activity_router)
 app.include_router(interviews_router)
+app.include_router(internal_documents_router)
 
 @app.get("/health")
 def health_check():

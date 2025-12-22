@@ -30,6 +30,31 @@ describe("DocumentsPanel", () => {
     api.listDocuments.mockResolvedValue([]);
   });
 
+  it("shows toast when scan marks a document infected", async () => {
+    const user = userEvent.setup();
+
+    api.presignDocumentUpload.mockResolvedValueOnce({
+      document: { id: 123, doc_type: "resume", original_filename: "resume.pdf", status: "pending", created_at: new Date().toISOString() },
+      upload_url: "https://example.invalid/presigned/put",
+    });
+    api.uploadToS3PresignedUrl.mockResolvedValueOnce(undefined);
+    api.confirmDocumentUpload.mockResolvedValueOnce({ message: "ok" });
+    api.listDocuments
+      .mockResolvedValueOnce([]) // initial load
+      .mockResolvedValueOnce([
+        { id: 123, doc_type: "resume", original_filename: "resume.pdf", status: "infected", created_at: new Date().toISOString() },
+      ]); // refresh after confirm
+
+    renderPanel();
+
+    const file = new File(["hello"], "resume.pdf", { type: "application/pdf" });
+    const inputs = Array.from(document.querySelectorAll("input[type='file']"));
+    await user.upload(inputs[0] as HTMLInputElement, file);
+
+    expect(await screen.findByText("A document was blocked by malware scanning. Please upload a clean copy.")).toBeInTheDocument();
+    expect(await screen.findByText("resume.pdf")).toBeInTheDocument();
+  });
+
   it("uploads successfully (presign -> s3 -> confirm -> refresh) and shows toast", async () => {
     const user = userEvent.setup();
 

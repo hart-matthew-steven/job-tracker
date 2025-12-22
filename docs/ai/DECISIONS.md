@@ -50,11 +50,35 @@ Record decisions that affect structure or long-term direction.
 ---
 
 ## 2025-12-18 — Email verification delivery via SES (boto3)
-- Decision: Send verification emails via AWS SES using `boto3` (SMTP remains optional fallback).
+- Decision: (Superseded) Initially send verification emails via AWS SES using `boto3` (SMTP remains optional fallback).
 - Rationale: SES is a production-grade path for delivery and aligns with AWS hosting plans.
 - Consequences:
   - Requires verified SES identity + appropriate IAM permissions/credentials.
   - Deliverability posture (SPF/DKIM/DMARC) should be addressed for public launch.
+
+---
+
+## 2025-12-21 — Email delivery providers: default to Resend; SES/Gmail supported
+- Decision: Default email provider is `resend` when `EMAIL_PROVIDER` is unset. Supported providers are `resend`, `ses`, and `gmail` (SMTP). Treat `EMAIL_PROVIDER=smtp` as a legacy alias for `gmail`.
+- Rationale: Resend provides an easy, modern integration for transactional emails; keeping SES and SMTP allows flexibility for AWS-hosted production and simple dev setups.
+- Consequences:
+  - Backend uses `FROM_EMAIL` for `resend`/`ses` only; Gmail/SMTP preserves `SMTP_FROM_EMAIL`.
+  - Resend requires `RESEND_API_KEY`.
+  - SES uses `AWS_REGION` for client initialization (no SES-specific region var).
+
+---
+
+## 2025-12-21 — Malware scanning: Migrated from ClamAV to AWS GuardDuty Malware Protection for S3
+- Decision: Migrate from custom ClamAV-based scanning to **AWS GuardDuty Malware Protection for S3** for production reliability.
+- Rationale: The ClamAV prototype encountered CDN definition update failures (403 cooldowns) from AWS egress IPs, requiring complex EFS + scheduled updater Lambda workarounds. GuardDuty is AWS-managed, eliminates CDN dependency, and requires no file downloads or custom scanning infrastructure.
+- Consequences:
+  - **Removed**: All ClamAV Lambda code (`lambda/clamav_scanner/`), SQS-based scan triggers, EFS-based definitions, quarantine copy/delete logic.
+  - **Added**: Lightweight Lambda forwarder (`lambda/guardduty_scan_forwarder/`) that parses EventBridge events from GuardDuty and calls the existing backend internal callback.
+  - **Backend unchanged**: DB scan fields (`scan_status`, `scan_checked_at`, `scan_message`) and internal callback API (`POST /internal/documents/{document_id}/scan-result`) remain the same integration point.
+  - **Frontend unchanged**: Download gating and status display based on `scan_status` remain unchanged.
+  - **AWS setup**: GuardDuty Malware Protection for S3 must be enabled; EventBridge rule forwards findings to the Lambda forwarder.
+  - **Verdict source of truth**: GuardDuty marks S3 objects with the tag `GuardDutyMalwareScanStatus`. EventBridge events may not include tags, so the Lambda forwarder reads the verdict via S3 `GetObjectTagging` when needed (requires `s3:GetObjectTagging` scoped to the upload prefix).
+  - **Infected files**: Remain in S3 but download is blocked by backend; no quarantine/copy needed (GuardDuty marks them).
 
 ---
 

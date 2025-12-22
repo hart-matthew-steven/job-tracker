@@ -32,8 +32,9 @@ Development vs Production:
 - **Production:** the backend runs behind AWS-managed networking and security controls
 
 Security considerations:
-- File scanning (ClamAV) is planned for the upload pipeline but is not yet fully implemented end-to-end.
-- Until scanning is wired up, uploaded documents may remain in a pending/scanning state.
+- File scanning is implemented via **AWS GuardDuty Malware Protection for S3**.
+- Uploaded documents are scanned automatically by AWS; download is blocked unless `scan_status=CLEAN`.
+- See `docs/architecture/security.md` for details.
 
 Detailed architecture diagrams and data-flow documentation live under:
 - `docs/architecture/overview.md`
@@ -157,6 +158,31 @@ Backend:
 See `docs/` for deeper or component-specific documentation as the project evolves.
 
 ---
+
+## Environment Variables (high-level)
+
+The backend and frontend are configured via environment variables.
+
+- **Backend**: see `backend/app/core/config.py` (values come from process env; local dev may use `.env`)
+- **Frontend**: Vite env vars (see `VITE_*`)
+
+This repo includes a generated `backend/.env.example` (**names only**, no values) based on variables referenced in backend code.
+
+### Email providers
+
+`EMAIL_PROVIDER` controls how verification emails are sent:
+
+- **`resend` (default)**: Resend API
+  - Requires: `FROM_EMAIL`, `RESEND_API_KEY`
+- **`ses`**: AWS SES via `boto3`
+  - Requires: `AWS_REGION`, `FROM_EMAIL`
+- **`gmail`**: SMTP (preserves `SMTP_FROM_EMAIL` as the From address)
+  - Requires: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`
+- **Legacy alias**: `smtp` is treated as `gmail`
+
+Notes:
+- `FROM_EMAIL` is used **only** for `ses` and `resend`.
+- `AWS_REGION` is used for AWS clients (including SES).
 
 ## Design Principles
 

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+import importlib
 
 from app.core.base import Base
 from app.core import config as app_config
@@ -98,15 +99,26 @@ def _reset_mutable_settings():
     finally:
         for k, v in original.items():
             setattr(app_config.settings, k, v)
+        # Default all tests to "rate limiting disabled" unless a test explicitly reloads routes with it enabled.
+        app_config.settings.ENABLE_RATE_LIMITING = False
 
 
 @pytest.fixture()
 def app(db_session):
     # Ensure settings has a JWT secret even if imported earlier.
     app_config.settings.JWT_SECRET = app_config.settings.JWT_SECRET or "test_jwt_secret"
+    # Default to disabled for the general test suite.
+    app_config.settings.ENABLE_RATE_LIMITING = False
 
-    # Import app lazily after env is set.
-    from app.main import app as fastapi_app
+    # IMPORTANT:
+    # SlowAPI decorators bind at import time, so we reload the routes + app with rate limiting disabled
+    # to avoid cross-test contamination (the rate limiting test reloads modules with it enabled).
+    import app.routes.documents as documents_routes
+    import app.main as main
+
+    importlib.reload(documents_routes)
+    importlib.reload(main)
+    fastapi_app = main.app
 
     def override_get_db():
         yield db_session

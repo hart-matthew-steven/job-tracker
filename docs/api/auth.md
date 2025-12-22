@@ -48,6 +48,7 @@ Lifecycle:
 
 Development:
 - Backend prints an email verification link on register/resend.
+ - Email delivery is provider-configured via `EMAIL_PROVIDER` (defaults to `resend`). See `backend/.env.example` for backend variable names.
 
 Production:
 - Auth is required and enforced

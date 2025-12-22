@@ -33,7 +33,8 @@ Keep it concise, factual, and employer-facing.
 - Settings stored on user with `/users/me/settings` GET/PUT:
   - `auto_refresh_seconds`, `theme`, `default_jobs_sort`, `default_jobs_view`, `data_retention_days`
 - Email delivery:
-  - Provider default is **SES via boto3**; SMTP remains optional fallback.
+  - Provider default is **Resend** (when `EMAIL_PROVIDER` is unset).
+  - Supported providers: `resend` (default), `ses`, `gmail` (SMTP); legacy alias `smtp` → `gmail`.
 - Documents:
   - Presigned S3 upload flow implemented (presign → upload to S3 → confirm).
 
@@ -53,9 +54,14 @@ Keep it concise, factual, and employer-facing.
 - CI quality gate (tests/lint/typecheck required before merge) partially implemented:
   - GitHub Actions workflows added (backend + frontend)
   - Branch protection still needs to be enabled in GitHub settings to block merges
-- Dev exposure + document verification pipeline not yet implemented:
-  - Backend behind ngrok (dev)
-  - ClamAV scanning Lambda to mark uploaded docs verified/infected
+- Document malware scanning fully implemented:
+  - **AWS GuardDuty Malware Protection for S3** is the production scan engine.
+  - EventBridge triggers a Lambda forwarder (`lambda/guardduty_scan_forwarder/`).
+  - Lambda extracts `document_id` from S3 key and calls backend internal callback.
+  - Verdict source of truth is the S3 object tag `GuardDutyMalwareScanStatus`; if the EventBridge event does not include tags, the Lambda calls S3 `GetObjectTagging` to read the verdict.
+  - Backend updates DB `scan_status` (PENDING → CLEAN/INFECTED/ERROR) and blocks downloads unless CLEAN.
+  - Frontend polls for status updates and displays scan state.
+  - Backend can still be exposed via ngrok for local dev/testing.
 - Production AWS deployment hardening is explicitly deferred until requested.
 
 ## Known Issues / Notes
@@ -81,6 +87,17 @@ Keep it concise, factual, and employer-facing.
  - Phase 7 started: CI quality gate wiring (GitHub Actions)
   - Workflows: `.github/workflows/ci-backend.yml` and `.github/workflows/ci-frontend.yml`
   - Setup guide: `docs/ci/github-actions.md` (includes branch protection steps)
+
+- Malware scanning pipeline implemented (S3 → GuardDuty → EventBridge → Lambda → backend callback):
+  - DB fields on `job_documents`: `scan_status`, `scan_checked_at`, `scan_message`, `quarantined_s3_key` (last field unused for GuardDuty)
+  - Backend internal callback: `POST /internal/documents/{document_id}/scan-result` (shared-secret header: `x-doc-scan-secret`)
+  - Lambda forwarder: `lambda/guardduty_scan_forwarder/` (EventBridge-triggered; parses GuardDuty findings; calls backend)
+  - Architecture docs: `docs/architecture/security.md`, `docs/architecture/data-flow.md`
+  - **Migrated from ClamAV** (removed SQS, EFS-based definitions, quarantine logic) to **AWS GuardDuty Malware Protection for S3**.
+ - Email delivery refactor:
+  - Default provider is `resend` with Resend Python SDK.
+  - Env vars: `FROM_EMAIL` (ses/resend only), `RESEND_API_KEY`, `AWS_REGION` for SES.
+  - Backend env var example is generated at `backend/.env.example` via `tools/generate_env_example.py`.
 
 ## Utilities
 - Dev DB reset + S3 cleanup script: `temp_scripts/reset_dev_db.py`

@@ -74,22 +74,25 @@ Production principle:
 
 ---
 
-## File Scanning (ClamAV)
+## File Scanning (AWS GuardDuty Malware Protection for S3)
 
 Uploaded files are treated as untrusted input.
 
 High-level approach:
-- Files are not considered “accepted” or “safe” until scanned
-- Scanning is performed using ClamAV
-- A file that fails scanning is quarantined/rejected and never processed further
+- Files are not considered "accepted" or "safe" until scanned
+- Scanning is performed by **AWS GuardDuty Malware Protection for S3** (AWS-managed service)
+- A file that fails scanning is marked as INFECTED and download is blocked
 
-Implementation options (architecture-compatible):
-- Scan in a dedicated scanning service/container (recommended)
-- Scan via a background job worker
-- Scan before moving the file to its “final” storage location
+Architecture:
+- Files are uploaded to S3 via presigned URLs
+- GuardDuty scans objects automatically (no file download by us)
+- EventBridge forwards GuardDuty findings to a Lambda forwarder
+- Lambda extracts `document_id` from S3 key and calls backend internal callback
+- Backend updates DB `scan_status` (CLEAN/INFECTED/ERROR) and blocks downloads unless CLEAN
 
 This project documents scanning behavior in more detail in:
 - `docs/architecture/security.md`
+- `docs/architecture/data-flow.md`
 
 ---
 

@@ -9,7 +9,7 @@ This document describes how data moves through the system. It is written to be i
     [FE]   Frontend (React + Vite)
     [API]  Backend API (Python)
     [AWS]  AWS-managed services (storage/queue/db)
-    [AV]   ClamAV scanning service/worker
+    [GD]   AWS GuardDuty Malware Protection for S3
     [DB]   Persistence layer (DB)
 
 ---
@@ -21,13 +21,19 @@ This document describes how data moves through the system. It is written to be i
       v
     [FE]  --->  [API]  --->  [DB]
                  |
-                 +----> [AWS Storage / Queue / Jobs]
+                 +----> [AWS S3]
                            |
                            v
-                         [AV]
+                         [GD] (GuardDuty scans object)
                            |
                            v
-                         [DB] (status updates)
+                      [EventBridge]
+                           |
+                           v
+                     [Lambda forwarder]
+                           |
+                           v
+                         [API] --> [DB] (status updates)
 
 ---
 
@@ -61,49 +67,64 @@ Optional (future):
 
 ## 3) Upload a document (resume, cover letter, etc.)
 
-### States (recommended)
-    PENDING_SCAN -> SCANNING -> CLEAN
-                       |
-                       +-> REJECTED
-                       |
-                       +-> FAILED (retryable)
+### States (implemented)
 
-### Flow (staged upload + scan)
+There are two related fields:
+- DB `scan_status`: `PENDING` → `CLEAN` | `INFECTED` | `ERROR`
+- UI `status` (legacy UI lifecycle): `pending` → `scanning` → `uploaded` | `infected` | `failed`
 
-    [FE] --(upload request)--> [API]
-      |
-      | (upload file)
-      v
-    [AWS Storage: STAGING]  (untrusted)
+### Flow (S3 → GuardDuty → EventBridge → Lambda → Backend callback)
+
+    User
       |
       v
-    [API] records metadata in [DB] with state = PENDING_SCAN
+    [FE] POST /jobs/{id}/documents/presign-upload  --------------------+
+      |                                                                |
+      |  (DB row created; scan_status=PENDING; status=pending)          |
+      |                                                                |
+      +--> PUT presigned S3 URL (<=5MB) --> [AWS S3] (untrusted object) |
+                                                                   +---+
+                                                                   |
+    [FE] POST /jobs/{id}/documents/confirm-upload  -----------------+
+      |   (status=scanning; still scan_status=PENDING)
       |
       v
-    [API] enqueues scan job/event --------------+
-      |                                        |
-      v                                        v
-    [AWS Queue/Jobs] -----------------------> [AV]
-                                              |
-                                              | (download/read staged file)
-                                              v
-                                       scan with ClamAV
-                                              |
-                    +-------------------------+-------------------------+
-                    |                                                   |
-                    v                                                   v
-                 CLEAN                                                REJECTED/FAILED
-                    |                                                   |
-                    v                                                   v
-    promote to [AWS Storage: CLEAN] OR mark clean in [DB]      quarantine/delete + update [DB]
-                    |
-                    v
-        [FE] can now access/attach the file safely
+    [AWS S3] object uploaded
+      |
+      v
+    [GuardDuty Malware Protection for S3] scans object (no file download by us)
+      |
+      v
+    [EventBridge] receives GuardDuty scan completion event
+      |
+      v
+    [Lambda: guardduty_scan_forwarder]
+      |
+      | extracts document_id from S3 key
+      | verdict source of truth: S3 object tag GuardDutyMalwareScanStatus
+      | (if verdict not in event, Lambda calls S3 GetObjectTagging)
+      | maps verdict -> CLEAN/INFECTED/ERROR
+      |
+      +--> NO_THREATS_FOUND -> POST /internal/documents/{document_id}/scan-result (token)
+      |                         updates scan_status=CLEAN; status=uploaded
+      |
+      +--> THREATS_FOUND    -> POST /internal/documents/{document_id}/scan-result (token)
+      |                         updates scan_status=INFECTED; status=infected
+      |
+      +--> ERROR/UNKNOWN    -> POST /internal/documents/{document_id}/scan-result (token)
+                               updates scan_status=ERROR; status=failed
 
 Security properties:
-- Untrusted files stay in STAGING until scanned.
-- Only CLEAN files are promoted/usable.
-- Failures never “partially succeed.”
+- Files are treated as hostile until scan_status == CLEAN.
+- Backend blocks downloads unless scan_status == CLEAN.
+- GuardDuty handles scanning without us downloading or processing untrusted files.
+- Infected files remain in S3 but are marked as INFECTED in DB (download blocked).
+
+### Dev note (current)
+
+The backend is not hosted in AWS yet. Lambda calls the backend through **ngrok**:
+
+    [Lambda] --> https://<ngrok-subdomain>.ngrok.app/internal/documents/... (x-doc-scan-secret)
 
 ---
 
@@ -144,7 +165,7 @@ Stable ingress + hardened controls:
     Internet --> [AWS Ingress] --> [API] --> [DB]
                           |
                           v
-                     [AWS Storage/Queue] --> [AV] --> [DB]
+                     [AWS S3] --> [GD] --> [EventBridge] --> [Lambda forwarder] --> [API] --> [DB]
 
 ---
 

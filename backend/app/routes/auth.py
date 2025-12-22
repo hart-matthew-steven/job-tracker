@@ -64,6 +64,7 @@ def send_verification_email(email: str, token: str) -> None:
     except EmailDeliveryError as e:
         raise HTTPException(status_code=500, detail=str(e))
     # Log something visible in dev logs without leaking the token/link.
+    # NOTE: settings.EMAIL_PROVIDER defaults to "resend" if unset.
     print(f"[email] verification email queued to={email} provider={settings.EMAIL_PROVIDER} msg_id={msg_id}")
 
 

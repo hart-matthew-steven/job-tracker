@@ -5,6 +5,7 @@ type Doc = {
   original_filename?: string | null;
   content_type?: string | null;
   status?: string | null;
+  scan_message?: string | null;
   created_at?: string | null;
 };
 
@@ -59,6 +60,14 @@ function StatusBadge({ status }: { status?: string | null }) {
     );
   }
 
+  if (s === "failed") {
+    return (
+      <span className={`${base} border-red-900/40 bg-red-950/10 text-red-200/80`}>
+        Failed
+      </span>
+    );
+  }
+
   if (!status) return null;
 
   return (
@@ -103,6 +112,7 @@ export default function DocRow({ doc, onDownload, onDelete, busy = false, active
     !canDownload && (status === "pending" || status === "scanning");
 
   const showBlocked = status === "infected";
+  const showFailed = status === "failed";
 
   return (
     <div className="flex items-start justify-between gap-4">
@@ -131,6 +141,17 @@ export default function DocRow({ doc, onDownload, onDelete, busy = false, active
         {showBlocked && (
           <div className="mt-1 text-xs text-red-200/80">
             This file was blocked by virus scanning. Please upload a clean copy.
+          </div>
+        )}
+
+        {showFailed && (
+          <div className="mt-1 text-xs text-red-200/80">
+            Scan failed.{" "}
+            {doc.scan_message ? (
+              <span className="text-red-200/70">({doc.scan_message})</span>
+            ) : (
+              <span className="text-red-200/70">(check Lambda + backend logs)</span>
+            )}
           </div>
         )}
       </div>

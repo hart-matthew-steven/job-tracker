@@ -28,9 +28,21 @@ Exact commands may vary and should be documented once finalized.
 
 - Configuration is provided via environment variables.
 - `.env` files are local-only and must never be committed.
-- A `.env.example` file may be used to document variable names.
+- A generated `backend/.env.example` file is used to document backend variable names (no values).
 
 Do not document secret values.
+
+### Email configuration (backend)
+
+`EMAIL_PROVIDER` defaults to **`resend`** when unset.
+
+Supported providers:
+- `resend` (default): requires `FROM_EMAIL` + `RESEND_API_KEY`
+- `ses`: requires `AWS_REGION` + `FROM_EMAIL`
+- `gmail`: uses SMTP and preserves `SMTP_FROM_EMAIL` as the From address
+
+Legacy alias:
+- `smtp` is treated as `gmail`
 
 ---
 
