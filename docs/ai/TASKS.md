@@ -6,19 +6,37 @@
   - GitHub Actions workflows added
   - Branch protection (required checks) needs to be enabled in GitHub UI
 
+- Email delivery: Resend provider + env var contract:
+  - Default email provider is `resend`
+  - Supported: `resend`, `ses`, `gmail` (legacy alias: `smtp` → `gmail`)
+  - Backend env var example generated at `backend/.env.example`
+
 ## Next
 - (none)
 
 ## Later
-- Phase 8: Dev exposure + upload verification pipeline (after CI is in place):
-  - Expose backend behind ngrok for dev/testing (documented + repeatable)
-  - Implement ClamAV scanning pipeline:
-    - S3 upload triggers Lambda (or equivalent) to scan object with ClamAV
-    - Update backend to mark document `verified` vs `infected` (finish the verification step)
-    - Ensure UI transitions from `pending/scanning` → final status
-- Phase 9: Production architecture planning (deferred until explicitly requested): deployment, secrets, SES domain identity, S3 policies, scanning pipeline
+- Production deployment:
+  - Host backend behind stable AWS ingress (ALB/API Gateway)
+  - Replace ngrok with production endpoint for Lambda → backend callbacks
+  - Enable branch protection in GitHub (require CI checks to pass)
+  - Configure stable domain for frontend
+  - Harden secrets management (AWS Secrets Manager)
 
 ## Completed
+- **Phase 8: Malware scanning pipeline** (GuardDuty Malware Protection for S3):
+  - Migrated from ClamAV-based scanning to AWS GuardDuty for production reliability
+  - Removed: ClamAV Lambda code, SQS triggers, EFS definitions, quarantine logic
+  - Added: `lambda/guardduty_scan_forwarder/` (EventBridge → Lambda → backend callback)
+  - Backend/frontend unchanged (same DB fields, internal callback API, download gating)
+  - Architecture docs updated (`docs/architecture/security.md`, `docs/architecture/data-flow.md`)
+- **Email delivery refactor**:
+  - Default provider: `resend` (with fallback to `ses`, `gmail`/`smtp`)
+  - Environment variable contract: `EMAIL_PROVIDER`, `FROM_EMAIL`, `RESEND_API_KEY`, `AWS_REGION`
+  - Backend `.env.example` generated and documented
+- Phase 7: CI quality gate (GitHub Actions workflows for backend + frontend lint/test)
+- Phase 6: Automated tests added (backend + frontend; comprehensive coverage)
+- Phase 5: Standardize API error shape (align backend responses with `docs/api/error-format.md`)
+- Phase 4: Refactor the frontend and backend codebases to be more production-ready (structure/readability/maintainability; preserve behavior)
 - Phase 3: migrate `frontend-web/` to TypeScript (completed; `src/` has no JS/JSX, `allowJs=false`)
 - Refactor frontend: split `frontend-web/src/App.tsx` (extract pages/components/hooks), add `src/routes/paths.ts`, and group job components under `src/components/jobs/`.
 - Consolidate backend user/settings responses (use dedicated settings schema for `/users/me/settings`)

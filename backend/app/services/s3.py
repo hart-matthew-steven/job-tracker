@@ -18,7 +18,14 @@ def _client():
 
 def build_s3_key(job_id: int, doc_type: str, original_filename: str) -> str:
     safe_name = original_filename.replace("/", "_").replace("\\", "_")
+    # NOTE: include a stable identifier segment so downstream scanners can map S3 events → DB rows.
+    # We still include a UUID to prevent leaking filename patterns and to avoid collisions.
     return f"{settings.S3_PREFIX}/jobs/{job_id}/{doc_type}/{uuid.uuid4()}_{safe_name}"
+
+
+def build_s3_key_for_document(job_id: int, doc_type: str, document_id: int, original_filename: str) -> str:
+    safe_name = original_filename.replace("/", "_").replace("\\", "_")
+    return f"{settings.S3_PREFIX}/jobs/{job_id}/{doc_type}/{document_id}/{uuid.uuid4()}_{safe_name}"
 
 
 def head_object(s3_key: str) -> dict:
@@ -26,9 +33,9 @@ def head_object(s3_key: str) -> dict:
     return s3.head_object(Bucket=settings.S3_BUCKET_NAME, Key=s3_key)
 
 
-def presign_upload(job_id: int, doc_type: str, filename: str, content_type: str | None) -> PresignUploadResult:
+def presign_upload(job_id: int, doc_type: str, filename: str, content_type: str | None, *, document_id: int) -> PresignUploadResult:
     s3 = _client()
-    key = build_s3_key(job_id, doc_type, filename)
+    key = build_s3_key_for_document(job_id, doc_type, document_id, filename)
 
     params = {"Bucket": settings.S3_BUCKET_NAME, "Key": key}
     if content_type:

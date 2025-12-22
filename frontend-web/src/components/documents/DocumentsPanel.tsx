@@ -21,6 +21,7 @@ type Doc = {
   original_filename?: string | null;
   content_type?: string | null;
   status?: string | null;
+  scan_message?: string | null;
   created_at?: string | null;
 };
 
@@ -54,6 +55,9 @@ export default function DocumentsPanel({ jobId, onActivityChange }: Props) {
 
   // Prevent stale refresh() results when switching jobs quickly
   const refreshSeqRef = useRef(0);
+  // Detect async scan status transitions (e.g. scanning -> infected) to show a toast once.
+  const prevStatusRef = useRef<Map<number, string>>(new Map());
+  const pollRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!jobId) return;
@@ -69,6 +73,40 @@ export default function DocumentsPanel({ jobId, onActivityChange }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
+  // Poll for scan result transitions so the user doesn't need to refresh manually.
+  useEffect(() => {
+    if (!jobId) return;
+    if (busy) return;
+
+    const hasScanning = docs.some((d) => String(d.status ?? "").toLowerCase() === "scanning");
+    if (!hasScanning) {
+      if (pollRef.current) {
+        window.clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+      return;
+    }
+
+    const startedAt = Date.now();
+    if (pollRef.current) return;
+
+    pollRef.current = window.setInterval(() => {
+      // Stop polling after 2 minutes (avoid background loops if Lambda is misconfigured).
+      if (Date.now() - startedAt > 2 * 60 * 1000) {
+        if (pollRef.current) window.clearInterval(pollRef.current);
+        pollRef.current = null;
+        return;
+      }
+      void refresh();
+    }, 3000);
+
+    return () => {
+      if (pollRef.current) window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId, busy, docs]);
+
   async function refresh() {
     if (!jobId) return;
     const mySeq = ++refreshSeqRef.current;
@@ -77,7 +115,21 @@ export default function DocumentsPanel({ jobId, onActivityChange }: Props) {
     try {
       const data = await listDocuments(jobId);
       if (refreshSeqRef.current !== mySeq) return; // stale
-      setDocs(Array.isArray(data) ? (data as Doc[]) : []);
+      const nextDocs = Array.isArray(data) ? (data as Doc[]) : [];
+
+      // Toast once when a document becomes blocked by malware scanning.
+      for (const d of nextDocs) {
+        const id = Number((d as { id?: unknown }).id);
+        if (!Number.isFinite(id)) continue;
+        const nextStatus = String((d as { status?: unknown }).status ?? "").toLowerCase();
+        const prevStatus = (prevStatusRef.current.get(id) ?? "").toLowerCase();
+        if (nextStatus === "infected" && prevStatus !== "infected") {
+          toast.error("A document was blocked by malware scanning. Please upload a clean copy.", "Documents");
+        }
+        prevStatusRef.current.set(id, nextStatus);
+      }
+
+      setDocs(nextDocs);
     } catch (e) {
       if (refreshSeqRef.current !== mySeq) return;
       const err = e as { message?: string } | null;

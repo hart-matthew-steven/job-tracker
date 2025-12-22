@@ -7,9 +7,9 @@ This document describes the backend structure and conventions at a high level.
 ## Stack
 
 - Python API (FastAPI-style architecture)
-- Persistence: (TBD)
-- Background processing: (TBD)
-- File scanning: ClamAV
+- Persistence: PostgreSQL + SQLAlchemy
+- Background processing: AWS-managed (EventBridge, Lambda)
+- File scanning: AWS GuardDuty Malware Protection for S3
 
 ---
 
@@ -40,6 +40,21 @@ Typical layout:
 - Consistent error format
 - Preserve API shapes during refactors unless intentionally versioned
 - Treat uploads as hostile until scanned
+
+---
+
+## Email delivery (configuration)
+
+The backend sends verification emails using the configured provider.
+
+- **`EMAIL_PROVIDER`**: defaults to `resend` when unset.
+  - Supported: `resend` (default), `ses`, `gmail`
+  - Legacy alias: `smtp` is treated as `gmail`
+- **`FROM_EMAIL`**: used only for `resend` and `ses` (do not use for `gmail`)
+- **`RESEND_API_KEY`**: required when using `resend`
+- **`AWS_REGION`**: used for AWS clients (including SES)
+
+See `backend/.env.example` for the full list of backend variable names.
 
 ---
 

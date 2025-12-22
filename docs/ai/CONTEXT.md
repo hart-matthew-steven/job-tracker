@@ -29,12 +29,17 @@ Primary goals:
 - Tests: pytest
 
 ## AWS / External Services (current)
-- **SES**: email verification delivery via `boto3` (provider default)
+- **Email**: provider-selectable for verification emails:
+  - `resend` (default)
+  - `ses`
+  - `gmail` (SMTP)
+  - legacy alias: `smtp` → `gmail`
 - **S3**: job document upload flow via presigned URLs (see `/jobs/{job_id}/documents/*`)
+- **GuardDuty Malware Protection for S3**: AWS-managed malware scanning for uploaded documents. EventBridge triggers a Lambda forwarder, which updates the backend document `scan_status`. The GuardDuty verdict is sourced from the S3 object tag `GuardDutyMalwareScanStatus` (Lambda falls back to S3 `GetObjectTagging` if the event payload does not include tags).
 
 ## Intended Future Direction (high-level)
 - iOS app (separate client, likely `frontend-ios/` when introduced)
-- AWS hardening and production infrastructure (explicitly staged; do not start ngrok/Lambda/scan pipeline work unless requested)
+- AWS hardening and production infrastructure (explicitly staged)
 - Continued refactors: improve maintainability, reduce duplication, keep tests comprehensive
 
 ## Key Flows

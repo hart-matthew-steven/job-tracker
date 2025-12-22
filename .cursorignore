@@ -24,6 +24,7 @@ ruff_cache/
 # --- Secrets / env files ---
 .env
 .env.*
+!.env.example
 
 # --- Logs & run artifacts (excluded from indexing by default) ---
 logs/

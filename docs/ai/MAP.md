@@ -28,6 +28,7 @@ Update it whenever key entry points or folder structure changes.
 - Models: `backend/app/models/` (expected)
 - Schemas: `backend/app/schemas/` (expected)
 - Backend tests: `backend/tests/` (pytest)
+- Backend env var reference: `backend/.env.example` (generated, names only)
 
 ## Architecture Docs
 - Overview: `docs/architecture/overview.md`
@@ -40,5 +41,7 @@ Update it whenever key entry points or folder structure changes.
 - Repo map: `docs/ai/MAP.md`
 
 ## Logs (ignored by default in Git)
+- `tools/` (repo utilities)
+  - Generate backend env var example: `tools/generate_env_example.py`
 - AI outputs: `logs/ai/`
 - Script outputs: `logs/scripts/`

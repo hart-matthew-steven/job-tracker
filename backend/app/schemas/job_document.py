@@ -39,7 +39,13 @@ class DocumentOut(BaseModel):
     content_type: str | None
     size_bytes: int | None
 
-    status: str  # pending | ready | failed
+    # Upload lifecycle (existing UI expectations): pending | scanning | uploaded | infected | failed
+    status: str
+    # Malware scan result (new, more explicit): PENDING | CLEAN | INFECTED | ERROR
+    scan_status: str
+    scan_checked_at: datetime | None = None
+    scan_message: str | None = None
+    quarantined_s3_key: str | None = None
     uploaded_at: datetime | None
     created_at: datetime
 

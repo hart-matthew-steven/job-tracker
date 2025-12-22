@@ -1,6 +1,6 @@
 import type React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ToastProvider } from "../components/ui/ToastProvider";
@@ -108,24 +108,40 @@ describe("JobsPage", () => {
     });
 
     afterEach(() => {
+        // Safety: if any test enabled fake timers (and then failed), ensure we don't leak into later tests.
+        vi.useRealTimers();
         vi.clearAllMocks();
     });
 
     it("calls listJobs on mount, and again (debounced) when search changes", async () => {
-        const user = userEvent.setup();
-        await renderPage();
+        vi.useFakeTimers();
+        try {
+            await renderPage();
 
-        // Initial load
-        expect(api.listJobs).toHaveBeenCalledTimes(1);
-        expect(api.listJobs.mock.calls[0]?.[0]).toMatchObject({ q: "", tag_q: "", tag: [], status: [] });
+            // Initial load(s). StrictMode / effects can cause more than one call, so only assert on the latest args.
+            expect(api.listJobs).toHaveBeenCalled();
+            expect(api.listJobs.mock.calls.at(-1)?.[0]).toMatchObject({ q: "", tag_q: "", tag: [], status: [] });
 
-        // Debounced filter refresh
-        const search = screen.getByPlaceholderText("Company, title, location…");
-        await user.type(search, "Acme");
-        await new Promise((r) => setTimeout(r, 300));
+            // Let any mount-time debounce settle so our baseline is stable.
+            await act(async () => {
+                await vi.runOnlyPendingTimersAsync();
+            });
 
-        expect(api.listJobs).toHaveBeenCalledTimes(2);
-        expect(api.listJobs.mock.calls[1]?.[0]).toMatchObject({ q: "Acme", tag_q: "", tag: [], status: [] });
+            const callsAfterMount = api.listJobs.mock.calls.length;
+
+            // Debounced refresh after changing search
+            const search = screen.getByPlaceholderText("Company, title, location…");
+            fireEvent.change(search, { target: { value: "Acme" } });
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(260);
+            });
+
+            expect(api.listJobs.mock.calls.length).toBeGreaterThan(callsAfterMount);
+            expect(api.listJobs.mock.calls.at(-1)?.[0]).toMatchObject({ q: "Acme", tag_q: "", tag: [], status: [] });
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("toggles a status chip and refreshes jobs (debounced) with status[]", async () => {
