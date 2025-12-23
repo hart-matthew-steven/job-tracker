@@ -32,6 +32,16 @@ Exact commands may vary and should be documented once finalized.
 
 Do not document secret values.
 
+### Database credentials
+
+- Postgres settings come from `DB_HOST`, `DB_PORT`, `DB_NAME`, and `DB_SSLMODE` (set to `require` for both local tunnels and hosted providers).
+- Two separate credentials are required:
+  - `DB_APP_USER` / `DB_APP_PASSWORD`: runtime API user, scoped to read/write existing tables but **not** allowed to create or alter schema.
+  - `DB_MIGRATOR_USER` / `DB_MIGRATOR_PASSWORD`: Alembic migrations user, allowed to apply DDL during deploys.
+- This split enforces least privilege so accidental schema changes cannot happen from the web app connection pool.
+- Local development should provision both roles even if they point to the same database instance; grant the migrator role the additional `CREATE` / `ALTER` privileges only.
+- Alembic (and any manual migration commands) must source `migrations_database_url`, while the application server keeps using `database_url` so it never escalates privileges.
+
 ### Email configuration (backend)
 
 `EMAIL_PROVIDER` defaults to **`resend`** when unset.

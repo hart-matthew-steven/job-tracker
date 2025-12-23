@@ -11,6 +11,13 @@ This document describes the backend structure and conventions at a high level.
 - Background processing: AWS-managed (EventBridge, Lambda)
 - File scanning: AWS GuardDuty Malware Protection for S3
 
+### Database connectivity
+
+- Shared settings: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_SSLMODE` (always set to `require` so TLS is enforced).
+- Runtime traffic uses `DB_APP_USER` / `DB_APP_PASSWORD`. This account is limited to data reads/writes and intentionally blocked from `CREATE TABLE` / `ALTER TABLE`.
+- Schema changes run through Alembic using `DB_MIGRATOR_USER` / `DB_MIGRATOR_PASSWORD`, the only credentials with DDL privileges.
+- Two discrete URLs exist in config: `database_url` (app) and `migrations_database_url` (Alembic). This protects production data by enforcing least privilege and keeps migrations auditable.
+
 ---
 
 ## Responsibilities

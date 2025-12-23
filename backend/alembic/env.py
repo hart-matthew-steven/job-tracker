@@ -28,6 +28,15 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Alembic should run with the migrator (DDL-capable) credentials.
+# Fall back to the app user if migrator env vars are not defined (e.g. local proto setups).
+if settings.DB_MIGRATOR_USER and settings.DB_MIGRATOR_PASSWORD:
+    migrations_url = settings.migrations_database_url
+else:
+    migrations_url = settings.database_url
+
+config.set_main_option("sqlalchemy.url", migrations_url)
+
 # add your model's MetaData object here
 # for 'autogenerate' support
 # from myapp import mymodel
@@ -53,7 +62,7 @@ def run_migrations_offline() -> None:
 
     """
     context.configure(
-        url=settings.database_url,
+        url=migrations_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -71,7 +80,7 @@ def run_migrations_online() -> None:
 
     """
     connectable = create_engine(
-        settings.database_url,
+        migrations_url,
         poolclass=pool.NullPool,
     )
 

@@ -168,6 +168,14 @@ The backend and frontend are configured via environment variables.
 
 This repo includes a generated `backend/.env.example` (**names only**, no values) based on variables referenced in backend code.
 
+### Database credentials
+
+- Shared parameters: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_SSLMODE` (set to `require` for every environment so TLS is enforced).
+- Runtime API connections use `DB_APP_USER` / `DB_APP_PASSWORD`. This user is scoped to CRUD/data access and must **not** have permission to create or alter tables.
+- Alembic migrations use `DB_MIGRATOR_USER` / `DB_MIGRATOR_PASSWORD`. This user holds the elevated privileges needed for schema changes and should be used only during deploys or manual migration runs.
+- The backend exposes two URLs via config: `database_url` (app user) and `migrations_database_url` (migrator). Always select the one that matches the task you are running.
+- Local development should create both roles, even if they initially share the same password, to mirror production least-privilege behavior.
+
 ### Email providers
 
 `EMAIL_PROVIDER` controls how verification emails are sent:
