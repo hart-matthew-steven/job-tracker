@@ -6,6 +6,7 @@ import type { FormEvent } from "react";
 import { loginUser } from "../../api";
 import { useAuth } from "../../auth/AuthProvider";
 import { useToast } from "../../components/ui/toast";
+import { ROUTES } from "../../routes/paths";
 
 function safeNext(nextRaw: string | null) {
   const v = (nextRaw || "").trim();
@@ -46,7 +47,12 @@ export default function LoginPage() {
 
       // ✅ update auth state first, then navigate
       setSession(res.access_token);
-      nav(next, { replace: true });
+      if (res.must_change_password) {
+        toast.info("Your password has expired. Please update it to continue.", "Login");
+        nav(ROUTES.changePassword, { replace: true });
+      } else {
+        nav(next, { replace: true });
+      }
     } catch (err) {
       const errObj = err as { message?: string } | null;
       const msg = errObj?.message ?? "Login failed";

@@ -52,7 +52,7 @@ def test_change_password_revokes_refresh_tokens(client, db_session):
     # Correct current password -> 200 and revokes tokens
     res2 = client.post(
         "/users/me/change-password",
-        json={"current_password": "test_password_123", "new_password": "new_password_123"},
+        json={"current_password": "test_password_123", "new_password": "NewPassword_123!"},
     )
     assert res2.status_code == 200
 
@@ -60,5 +60,33 @@ def test_change_password_revokes_refresh_tokens(client, db_session):
     row = db_session.query(RefreshToken).filter(RefreshToken.user_id == u.id).first()
     assert row is not None
     assert row.revoked_at is not None
+
+
+def test_change_password_rejects_weak_password(client, db_session):
+    res = client.post(
+        "/users/me/change-password",
+        json={"current_password": "test_password_123", "new_password": "password"},
+    )
+    assert res.status_code == 400
+    detail = res.json().get("details")
+    assert detail["code"] == "WEAK_PASSWORD"
+    assert "uppercase" in detail["violations"]
+
+
+def test_change_password_updates_password_changed_at(client, db_session):
+    from app.models.user import User
+
+    user = db_session.query(User).filter(User.email == "test@example.com").first()
+    assert user is not None
+    before = user.password_changed_at
+
+    res = client.post(
+        "/users/me/change-password",
+        json={"current_password": "test_password_123", "new_password": "SafePassword_789!"},
+    )
+    assert res.status_code == 200
+
+    db_session.refresh(user)
+    assert user.password_changed_at > before
 
 

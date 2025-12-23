@@ -8,6 +8,7 @@ Keep it concise, factual, and employer-facing.
 ### Frontend (`frontend-web/`)
 - App shell with responsive nav and account menu.
 - Auth pages: Login / Register / Verify (verify is auto-only via email link).
+- Register + Change Password now share a password policy helper and inline `PasswordRequirements` list to block weak passwords before submission; backend error violations render in the UI.
 - Jobs page:
   - Server-side search + filters (q, tags, multi-select statuses)
   - Saved views UI
@@ -35,6 +36,14 @@ Keep it concise, factual, and employer-facing.
 - Email delivery:
   - Provider default is **Resend** (when `EMAIL_PROVIDER` is unset).
   - Supported providers: `resend` (default), `ses`, `gmail` (SMTP); legacy alias `smtp` → `gmail`.
+- Password policy:
+  - Configurable via `PASSWORD_MIN_LENGTH` (default 14) and `PASSWORD_MAX_AGE_DAYS` (default 90).
+  - `app/core/password_policy.py` enforces requirements (length, upper/lowercase, number, special char, denylist, no email/name).
+  - `users.password_changed_at` tracks rotations; login/refresh + `/users/me` responses include `must_change_password` so the frontend can gate access.
+- Database access:
+  - Runtime API connects with `DB_APP_USER` / `DB_APP_PASSWORD` (CRUD-only).
+  - Alembic migrations run with `DB_MIGRATOR_USER` / `DB_MIGRATOR_PASSWORD` (DDL).
+  - Config exposes both URLs (`database_url`, `migrations_database_url`), keeping least privilege enforced in prod and dev.
 - Documents:
   - Presigned S3 upload flow implemented (presign → upload to S3 → confirm).
 
@@ -42,7 +51,7 @@ Keep it concise, factual, and employer-facing.
 - Registration → email verification link → verification → login.
 - Logout + auth navigation guards.
 - Profile fetch.
-- Change password (shows validation errors; on success logs out and routes to login).
+- Change password (shows validation errors; on success logs out and routes to login). Enforces the same password policy as registration; expired passwords trigger the change-password redirect.
 - DB-backed settings (auto refresh + jobs defaults + theme + data retention preference).
 - Job listing + detail view (notes + documents panels) with auth.
 - Tags end-to-end (stored on jobs; filterable in UI; persisted in saved views).
@@ -98,6 +107,10 @@ Keep it concise, factual, and employer-facing.
   - Default provider is `resend` with Resend Python SDK.
   - Env vars: `FROM_EMAIL` (ses/resend only), `RESEND_API_KEY`, `AWS_REGION` for SES.
   - Backend env var example is generated at `backend/.env.example` via `tools/generate_env_example.py`.
+- Password policy + rotation:
+  - Added password policy helper + env vars, enforced at registration/change flows.
+  - Alembic migration backfilled `password_changed_at`; auth responses expose `must_change_password`.
+  - Frontend mirrors the rules client-side and blocks weak passwords with a shared helper + requirements UI.
 
 ## Utilities
 - Dev DB reset + S3 cleanup script: `temp_scripts/reset_dev_db.py`

@@ -10,6 +10,7 @@ This document describes the backend structure and conventions at a high level.
 - Persistence: PostgreSQL + SQLAlchemy
 - Background processing: AWS-managed (EventBridge, Lambda)
 - File scanning: AWS GuardDuty Malware Protection for S3
+- Authentication: JWT access tokens + HttpOnly refresh cookies, Argon2 password hashing, password rotation
 
 ### Database connectivity
 
@@ -18,6 +19,11 @@ This document describes the backend structure and conventions at a high level.
 - Schema changes run through Alembic using `DB_MIGRATOR_USER` / `DB_MIGRATOR_PASSWORD`, the only credentials with DDL privileges.
 - Two discrete URLs exist in config: `database_url` (app) and `migrations_database_url` (Alembic). This protects production data by enforcing least privilege and keeps migrations auditable.
 - Legacy `DB_USER` / `DB_PASSWORD` configuration has been removed; always supply both credential sets explicitly.
+
+### Password policy
+
+- Configurable via `PASSWORD_MIN_LENGTH` (default 14) and `PASSWORD_MAX_AGE_DAYS` (default 90). Strength checks apply whenever passwords are set or changed; login never rejects existing weak passwords.
+- A dedicated `password_changed_at` timestamp on `users` tracks the last rotation. Auth responses (login/refresh/`GET /users/me`) include `must_change_password` when the age limit is exceeded so the frontend can gate access and force a rotation workflow.
 
 ---
 

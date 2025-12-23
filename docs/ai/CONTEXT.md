@@ -5,6 +5,7 @@
 Job Tracker is a personal job application tracking system with:
 - A web frontend for managing applications, notes, and documents
 - A Python API backend for auth, persistence, and document workflows
+- Enforced password policy + rotation (minimum length, complexity, expiration warnings)
 
 Primary goals:
 - Track job applications + statuses
@@ -18,6 +19,8 @@ Primary goals:
 - React Router
 - Central API client in `frontend-web/src/api.ts`
 - Tests: Vitest + React Testing Library
+- Shared password policy helper in `src/lib/passwordPolicy.ts`
+- Password requirements UI (`src/components/forms/PasswordRequirements.tsx`) blocks weak passwords on Register/Change Password
 
 ### Backend (`backend/`)
 - FastAPI
@@ -27,6 +30,9 @@ Primary goals:
 - Refresh tokens stored in DB, delivered via HttpOnly cookie
 - AWS SDK: `boto3` (used for SES and S3-related workflows)
 - Tests: pytest
+- Strong password policy enforced when setting passwords via `app/core/password_policy.py`
+- `users.password_changed_at` tracks rotation; login responses include `must_change_password`
+- Database access split between least-privilege runtime (`DB_APP_USER`) and migrations (`DB_MIGRATOR_USER`) credentials, each with its own connection URL.
 
 ## AWS / External Services (current)
 - **Email**: provider-selectable for verification emails:
@@ -45,6 +51,7 @@ Primary goals:
 ## Key Flows
 ### Auth + Email verification
 - Register → verification email sent → user clicks frontend `/verify?token=...` → frontend calls backend `/auth/verify` → then login allowed.
+- Register/change/reset password enforce password policy (length, mixed case, number, special, denylist, no email/name). Expired passwords still log in but responses set `must_change_password` so UI can redirect to Change Password.
 
 ### Job documents (S3)
 - Backend issues presigned upload URL → client uploads directly to S3 → client confirms upload → backend tracks document metadata + status.

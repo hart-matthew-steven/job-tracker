@@ -39,6 +39,10 @@ class Settings:
     DB_MIGRATOR_PASSWORD = os.getenv("DB_MIGRATOR_PASSWORD", "")
     DB_SSLMODE = os.getenv("DB_SSLMODE", "require")
 
+    # Password policy
+    PASSWORD_MIN_LENGTH = int(os.getenv("PASSWORD_MIN_LENGTH", "14"))
+    PASSWORD_MAX_AGE_DAYS = int(os.getenv("PASSWORD_MAX_AGE_DAYS", "90"))
+
     # CORS (CSV)
     # Keep your matts-macbook.local default AND localhost as a sane dev default:
     _CORS_DEFAULTS = ["http://matts-macbook.local:5173", "http://localhost:5173", "http://127.0.0.1:5173"]

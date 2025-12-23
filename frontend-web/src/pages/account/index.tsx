@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { FormEvent } from "react";
 
@@ -7,6 +7,8 @@ import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useSettings } from "../../hooks/useSettings";
 import { changePassword } from "../../api";
 import { useToast } from "../../components/ui/toast";
+import PasswordRequirements from "../../components/forms/PasswordRequirements";
+import { evaluatePassword, describeViolation, PASSWORD_MIN_LENGTH, type PasswordViolation } from "../../lib/passwordPolicy";
 
 type PageShellProps = {
     title: string;
@@ -257,16 +259,35 @@ export function ChangePasswordPage() {
     const { logout } = useAuth();
     const nav = useNavigate();
     const toast = useToast();
+    const { user } = useCurrentUser();
+
     const [currentPassword, setCurrentPassword] = useState("");
     const [newPassword, setNewPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
+    const [serverViolations, setServerViolations] = useState<PasswordViolation[]>([]);
 
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const [message, setMessage] = useState("");
 
-    const canSubmit = currentPassword.length > 0 && newPassword.length >= 8;
+    const normalizedEmail = user?.email ?? "";
+    const normalizedName = user?.name ?? "";
+    const clientViolations = useMemo(
+        () => evaluatePassword(newPassword, { email: normalizedEmail, name: normalizedName }),
+        [newPassword, normalizedEmail, normalizedName]
+    );
+    const violationSet = useMemo(
+        () => new Set<PasswordViolation>([...clientViolations, ...serverViolations]),
+        [clientViolations, serverViolations]
+    );
+
+    useEffect(() => {
+        setServerViolations([]);
+    }, [newPassword, normalizedEmail, normalizedName]);
+
+    const canSubmit = currentPassword.length > 0 && newPassword.length > 0 && clientViolations.length === 0;
     const mismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+    const passwordExpired = !!user?.must_change_password;
 
     async function onSubmit(e: FormEvent<HTMLFormElement>) {
         e.preventDefault();
@@ -274,7 +295,7 @@ export function ChangePasswordPage() {
         setMessage("");
 
         if (!canSubmit) {
-            const msg = "Please enter your current password and a new password (8+ characters).";
+            const msg = "Please enter your current password and a stronger new password.";
             setError(msg);
             toast.error(msg, "Change password");
             return;
@@ -282,6 +303,14 @@ export function ChangePasswordPage() {
         if (mismatch) {
             const msg = "New password and confirmation do not match.";
             setError(msg);
+            toast.error(msg, "Change password");
+            return;
+        }
+
+        if (clientViolations.length > 0) {
+            const msg = "New password does not meet the requirements.";
+            setError(msg);
+            setServerViolations(clientViolations);
             toast.error(msg, "Change password");
             return;
         }
@@ -300,10 +329,18 @@ export function ChangePasswordPage() {
             await logout();
             nav("/login", { replace: true });
         } catch (e2) {
-            const err = e2 as { message?: string } | null;
-            const msg = err?.message ?? "Failed to change password";
-            setError(msg);
-            toast.error(msg, "Change password");
+            const err = e2 as { message?: string; detail?: { code?: string; violations?: string[] } } | null;
+            if (err?.detail?.code === "WEAK_PASSWORD") {
+                const violations = (err.detail.violations ?? []) as PasswordViolation[];
+                setServerViolations(violations);
+                const msg = "New password does not meet the requirements.";
+                setError(msg);
+                toast.error(msg, "Change password");
+            } else {
+                const msg = err?.message ?? "Failed to change password";
+                setError(msg);
+                toast.error(msg, "Change password");
+            }
         } finally {
             setBusy(false);
         }
@@ -311,6 +348,11 @@ export function ChangePasswordPage() {
 
     return (
         <PageShell title="Change password" subtitle="This form validates locally and submits to the API.">
+            {passwordExpired && (
+                <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+                    Your password has expired. Please update it to continue.
+                </div>
+            )}
             {error && (
                 <div className="mb-4 rounded-xl border border-red-900/40 bg-red-950/30 px-4 py-3 text-sm text-red-200">
                     {error}
@@ -324,8 +366,11 @@ export function ChangePasswordPage() {
 
             <form onSubmit={onSubmit} className="max-w-lg space-y-4">
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Current password</label>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-200" htmlFor="current-password-input">
+                        Current password
+                    </label>
                     <input
+                        id="current-password-input"
                         type="password"
                         autoComplete="current-password"
                         value={currentPassword}
@@ -338,23 +383,28 @@ export function ChangePasswordPage() {
                 </div>
 
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">New password</label>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-200" htmlFor="new-password-input">
+                        New password
+                    </label>
                     <input
+                        id="new-password-input"
                         type="password"
                         autoComplete="new-password"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
                         className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-600/30 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500"
-                        placeholder="At least 8 characters"
+                        placeholder={`At least ${PASSWORD_MIN_LENGTH} characters`}
                         disabled={busy}
                         required
                     />
-                    <div className="mt-1 text-xs text-slate-500">Minimum length: 8 characters (local validation only).</div>
                 </div>
 
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Confirm new password</label>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-200" htmlFor="confirm-password-input">
+                        Confirm new password
+                    </label>
                     <input
+                        id="confirm-password-input"
                         type="password"
                         autoComplete="new-password"
                         value={confirmPassword}
@@ -371,6 +421,19 @@ export function ChangePasswordPage() {
                     />
                     {mismatch && <div className="mt-1 text-xs text-red-600 dark:text-red-200">Passwords do not match.</div>}
                 </div>
+
+                <PasswordRequirements violations={violationSet} minLength={PASSWORD_MIN_LENGTH} />
+
+                {serverViolations.length > 0 && (
+                    <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+                        <div className="font-semibold">Fix the following:</div>
+                        <ul className="mt-1 list-disc pl-4">
+                            {Array.from(new Set(serverViolations)).map((code) => (
+                                <li key={code}>{describeViolation(code)}</li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
 
                 <button
                     type="submit"

@@ -17,6 +17,7 @@ Update it whenever key entry points or folder structure changes.
   - Layout shell: `frontend-web/src/components/layout/AppShell.tsx`
   - Toasts: `frontend-web/src/components/ui/ToastProvider.tsx`
   - Modal: `frontend-web/src/components/ui/Modal.tsx`
+  - Password helpers: `frontend-web/src/lib/passwordPolicy.ts`, `frontend-web/src/components/forms/PasswordRequirements.tsx`
 - Jobs page submodules: `frontend-web/src/pages/jobs/*`
 - Frontend tests: `frontend-web/src/**/*.test.tsx` (Vitest)
 
@@ -25,6 +26,8 @@ Update it whenever key entry points or folder structure changes.
 - Routes: `backend/app/routes/` (expected)
 - Services: `backend/app/services/` (expected)
 - Core (auth/config/db): `backend/app/core/` (expected)
+  - Password policy enforcement helpers: `backend/app/core/password_policy.py`
+  - DB config exposes separate runtime vs migrator credentials (`DB_APP_*`, `DB_MIGRATOR_*`) via `settings.database_url` / `settings.migrations_database_url`
 - Models: `backend/app/models/` (expected)
 - Schemas: `backend/app/schemas/` (expected)
 - Backend tests: `backend/tests/` (pytest)

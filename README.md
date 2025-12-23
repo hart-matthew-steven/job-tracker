@@ -177,6 +177,13 @@ This repo includes a generated `backend/.env.example` (**names only**, no values
 - Local development should create both roles, even if they initially share the same password, to mirror production least-privilege behavior.
 - Legacy `DB_USER` / `DB_PASSWORD` vars have been removed; define both `DB_APP_*` and `DB_MIGRATOR_*` explicitly.
 
+### Password policy & rotation
+
+- Defaults: `PASSWORD_MIN_LENGTH=14`, `PASSWORD_MAX_AGE_DAYS=90`.
+- Strength checks (min length, mixed case, number, special char, denylist, no email/name inclusion) apply whenever a password is set or changed (registration, change password, reset flows). Existing stored passwords continue to work until rotated.
+- Rotation uses `password_changed_at` with the configured `PASSWORD_MAX_AGE_DAYS`. Logins succeeding with expired passwords still receive tokens, but every auth response (login/refresh/`GET /users/me`) includes `must_change_password: true` so the frontend can block access and redirect to the Change Password screen.
+- Configure the policy via the env vars above; the backend is the source of truth, and the frontend mirrors the rules for UX-only validation.
+
 ### Email providers
 
 `EMAIL_PROVIDER` controls how verification emails are sent:

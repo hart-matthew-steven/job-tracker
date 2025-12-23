@@ -43,6 +43,13 @@ Do not document secret values.
 - Alembic (and any manual migration commands) must source `migrations_database_url`, while the application server keeps using `database_url` so it never escalates privileges.
 - Legacy single-user vars (`DB_USER`, `DB_PASSWORD`) have been removed to make the separation explicit.
 
+### Password policy & rotation
+
+- Configure via `PASSWORD_MIN_LENGTH` (default 14) and `PASSWORD_MAX_AGE_DAYS` (default 90).
+- Password strength is enforced on registration/change/reset: min length, upper/lowercase, number, special char, denylist, and “no email/name in password”.
+- The `users.password_changed_at` column tracks when the password was last updated. Migration backfills existing rows to their `created_at` so no one is forced to rotate immediately.
+- When `PASSWORD_MAX_AGE_DAYS` is greater than zero, logins that exceed that age still succeed, but API responses include `must_change_password: true`, allowing the frontend to redirect to the Change Password screen until the user rotates their credentials.
+
 ### Email configuration (backend)
 
 `EMAIL_PROVIDER` defaults to **`resend`** when unset.

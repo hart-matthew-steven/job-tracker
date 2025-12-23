@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -48,6 +49,7 @@ def test_rate_limiting_returns_429_when_enabled(db_session):
             password_hash=hash_password("test_password_123"),
             is_active=True,
             is_email_verified=True,
+            password_changed_at=datetime.now(timezone.utc),
         )
         db_session.add(user)
         db_session.commit()

@@ -15,6 +15,7 @@ from app.core.security import (
     create_email_verification_token,
     verify_token_purpose,
 )
+from app.core.password_policy import ensure_strong_password, mark_password_changed, password_is_expired
 from app.models.user import User
 from app.schemas.auth import (
     RegisterIn,
@@ -78,6 +79,8 @@ def register(payload: RegisterIn, db: Session = Depends(get_db)):
     if not name:
         raise HTTPException(status_code=400, detail="Name is required")
 
+    ensure_strong_password(payload.password, email=email, username=name)
+
     existing = db.query(User).filter(User.email == email).first()
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
@@ -90,6 +93,7 @@ def register(payload: RegisterIn, db: Session = Depends(get_db)):
         is_email_verified=False,
         email_verified_at=None,
     )
+    mark_password_changed(user)
     db.add(user)
     # Only commit user after verification email send succeeds.
     db.flush()
@@ -172,8 +176,11 @@ def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
     refresh_token = issue_refresh_token(db, user_id=user.id)
     set_refresh_cookie(response, refresh_token)
 
-    # TokenOut returns access token only
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "must_change_password": password_is_expired(user),
+    }
 
 
 @router.post("/refresh", response_model=TokenOut)
@@ -204,7 +211,11 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
     set_refresh_cookie(response, new_refresh_token)
 
     access_token = create_access_token(subject=user.email)
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "must_change_password": password_is_expired(user),
+    }
 
 
 @router.post("/logout", response_model=MessageOut)

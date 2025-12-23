@@ -36,6 +36,7 @@ def test_auth_register_verify_login_refresh_logout(client, db_session, monkeypat
     assert res3.status_code == 200
     body = res3.json()
     assert isinstance(body.get("access_token"), str) and body["access_token"]
+    assert body["must_change_password"] is False
     assert "set-cookie" in {k.lower() for k in res3.headers.keys()}
 
     # Refresh should rotate and return a new access token
@@ -43,6 +44,7 @@ def test_auth_register_verify_login_refresh_logout(client, db_session, monkeypat
     assert res4.status_code == 200
     body2 = res4.json()
     assert isinstance(body2.get("access_token"), str) and body2["access_token"]
+    assert body2["must_change_password"] is False
 
     # Logout clears cookie
     res5 = client.post("/auth/logout")
