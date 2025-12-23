@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
+import logging
 import uuid
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from sqlalchemy.orm import Session
 
@@ -31,6 +33,8 @@ from app.services.documents import (
 )
 
 router = APIRouter(prefix="/jobs", tags=["documents"], dependencies=[Depends(get_current_user)])
+logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _maybe_limit(rule: str):
@@ -260,6 +264,10 @@ def document_scan_result(
     db: Session = Depends(get_db),
 ):
     # Lambda endpoint: shared secret auth
+    if not settings.GUARD_DUTY_ENABLED:
+        logger.info("GuardDuty disabled; ignoring /jobs/%s/documents/scan-result", job_id)
+        return {"ok": False, "guard_duty_enabled": False}
+
     if not settings.DOC_SCAN_SHARED_SECRET:
         raise HTTPException(status_code=500, detail="Server missing DOC_SCAN_SHARED_SECRET")
 

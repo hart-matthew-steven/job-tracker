@@ -95,6 +95,11 @@ def _reset_mutable_settings():
         "ENABLE_RATE_LIMITING",
         "PASSWORD_MIN_LENGTH",
         "PASSWORD_MAX_AGE_DAYS",
+        "EMAIL_ENABLED",
+        "EMAIL_PROVIDER",
+        "RESEND_API_KEY",
+        "FROM_EMAIL",
+        "GUARD_DUTY_ENABLED",
     ]
     original = {k: getattr(app_config.settings, k) for k in keys}
     try:

@@ -56,6 +56,7 @@ def test_document_scan_result_clean_allows_download(client):
     assert res2.status_code == 200
 
     # Scan result endpoint requires shared secret
+    app_config.settings.GUARD_DUTY_ENABLED = True
     app_config.settings.DOC_SCAN_SHARED_SECRET = "scan_secret"
 
     res3 = client.post(
@@ -74,6 +75,7 @@ def test_document_scan_result_clean_allows_download(client):
 
 def test_document_scan_result_unauthorized(client):
     job = _create_job(client)
+    app_config.settings.GUARD_DUTY_ENABLED = True
     app_config.settings.DOC_SCAN_SHARED_SECRET = "scan_secret"
 
     res = client.post(

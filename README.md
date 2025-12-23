@@ -85,6 +85,75 @@ Typical structure:
 Backend-specific documentation (if present) lives under:
 - `docs/backend/`
 
+### Backend Docker
+
+- **Build** (local/App Runner-ready image):
+
+  ```bash
+  cd backend
+  docker build -t jobtracker-backend .
+  ```
+
+- **Run locally** (supply env vars at runtime; `.env` stays outside the image):
+
+  ```bash
+  docker run --rm -p 8000:8000 \
+    --env-file backend/.env \
+    jobtracker-backend
+  ```
+
+  The container listens on `0.0.0.0:${PORT:-8000}` so App Runner can inject `PORT`.
+
+- **Docker Compose (optional local stack)**:
+
+  ```bash
+  docker compose up --build
+  ```
+
+  This starts Postgres + the backend using non-secret defaults. Override any values by exporting env vars or passing your own env file—avoid editing `.env` directly in the repo since the container never copies it.
+  The Postgres container now runs an init script (only the first time the volume is created) that provisions the local `DB_APP_USER` / `DB_MIGRATOR_USER` roles. If you already had an existing volume before this change, run `docker compose down -v` once to recreate it so the script executes, then `docker compose up --build` again.
+
+  **Local Docker debugging checklist**
+
+  1. **Reset Postgres volume (only if the credentials/scripts changed):**
+
+     ```bash
+     docker compose down -v
+     ```
+
+  2. **Start the services:**
+
+     ```bash
+     docker compose up --build
+     ```
+
+  3. **Apply migrations inside the backend container:**
+
+     ```bash
+     docker compose exec backend alembic upgrade head
+     ```
+
+  4. **(Only if you kept an existing volume)** grant privileges manually so the runtime user can see tables created before the init script existed:
+
+     ```bash
+     docker compose exec db psql -U jobtracker -d jobtracker \
+       -c "GRANT USAGE ON SCHEMA public TO jobtracker_app; \
+           GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO jobtracker_app; \
+           GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO jobtracker_app; \
+           ALTER DEFAULT PRIVILEGES FOR ROLE jobtracker_migrator IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO jobtracker_app; \
+           ALTER DEFAULT PRIVILEGES FOR ROLE jobtracker_migrator IN SCHEMA public GRANT USAGE,SELECT ON SEQUENCES TO jobtracker_app;"
+     ```
+
+     Skip this when you start from a fresh volume—the init script already grants the rights.
+
+  5. **Verify a user when email delivery is disabled locally:**
+
+     ```bash
+     docker compose exec backend python -c "from app.core.security import create_email_verification_token; from app.core.config import settings; email='<EMAIL>'; token=create_email_verification_token(email); print(f'{settings.FRONTEND_BASE_URL}/verify?token={token}&email={email}')"
+     ```
+
+     Copy the printed URL into your browser to mark the account verified. Afterwards you can log in normally.
+
 ---
 
 ## Documentation
@@ -176,6 +245,11 @@ This repo includes a generated `backend/.env.example` (**names only**, no values
 - The backend exposes two URLs via config: `database_url` (app user) and `migrations_database_url` (migrator). Always select the one that matches the task you are running.
 - Local development should create both roles, even if they initially share the same password, to mirror production least-privilege behavior.
 - Legacy `DB_USER` / `DB_PASSWORD` vars have been removed; define both `DB_APP_*` and `DB_MIGRATOR_*` explicitly.
+
+### Optional integrations
+
+- `EMAIL_ENABLED` (default `false`): enable outbound email delivery. When disabled, the backend no-ops and logs instead of calling providers. When enabled, configure `EMAIL_PROVIDER` + required credentials.
+- `GUARD_DUTY_ENABLED` (default `false`): enable AWS GuardDuty malware callbacks. When disabled, the callback endpoints no-op so local dev can run without GuardDuty or secrets.
 
 ### Password policy & rotation
 

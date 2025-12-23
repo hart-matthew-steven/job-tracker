@@ -1,3 +1,4 @@
+import logging
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,9 +18,17 @@ from app.routes.activity import router as activity_router
 from app.routes.interviews import router as interviews_router
 from app.routes.internal_documents import router as internal_documents_router
 
+logger = logging.getLogger(__name__)
+
 require_jwt_secret()
 
 app = FastAPI(title="Job Application Tracker")
+logger.info(
+    "Startup config: EMAIL_ENABLED=%s provider=%s GUARD_DUTY_ENABLED=%s",
+    settings.EMAIL_ENABLED,
+    (settings.EMAIL_PROVIDER or "resend"),
+    settings.GUARD_DUTY_ENABLED,
+)
 
 _ERROR_CODE_BY_STATUS: dict[int, str] = {
     400: "VALIDATION_ERROR",

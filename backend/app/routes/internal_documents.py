@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
@@ -11,6 +12,8 @@ from app.models.job_document import JobDocument
 
 
 router = APIRouter(prefix="/internal/documents", tags=["internal"], include_in_schema=False)
+
+logger = logging.getLogger(__name__)
 
 
 def _require_internal_token(
@@ -26,6 +29,9 @@ def _require_internal_token(
     - x-scan-secret (legacy endpoint header)
     - x-doc-scan-secret (preferred for GuardDuty forwarder)
     """
+    if not settings.GUARD_DUTY_ENABLED:
+        return
+
     if not settings.DOC_SCAN_SHARED_SECRET:
         raise HTTPException(status_code=500, detail="Server missing DOC_SCAN_SHARED_SECRET")
 
@@ -79,6 +85,9 @@ def get_internal_document_state(
     db: Session = Depends(get_db),
 ):
     _require_internal_token(x_internal_token, x_scan_secret, x_doc_scan_secret)
+    if not settings.GUARD_DUTY_ENABLED:
+        logger.info("GuardDuty disabled; internal document state requested but feature is off document_id=%s", document_id)
+        raise HTTPException(status_code=404, detail="GuardDuty integration disabled")
 
     doc = db.query(JobDocument).filter(JobDocument.id == document_id).first()
     if not doc:
@@ -113,6 +122,10 @@ def post_internal_document_scan_result(
         "scan_message": "...",                     (optional)
       }
     """
+    if not settings.GUARD_DUTY_ENABLED:
+        logger.info("GuardDuty disabled; ignoring internal scan result for document_id=%s", document_id)
+        return {"ok": False, "guard_duty_enabled": False}
+
     _require_internal_token(x_internal_token, x_scan_secret, x_doc_scan_secret)
 
     doc = db.query(JobDocument).filter(JobDocument.id == document_id).first()
