@@ -80,6 +80,24 @@ Record decisions that affect structure or long-term direction.
   - **Verdict source of truth**: GuardDuty marks S3 objects with the tag `GuardDutyMalwareScanStatus`. EventBridge events may not include tags, so the Lambda forwarder reads the verdict via S3 `GetObjectTagging` when needed (requires `s3:GetObjectTagging` scoped to the upload prefix).
   - **Infected files**: Remain in S3 but download is blocked by backend; no quarantine/copy needed (GuardDuty marks them).
 
+## 2025-12-23 — Password policy + rotation enforcement
+- Decision: Introduce configurable password strength + expiration rules (`PASSWORD_MIN_LENGTH` default 14, `PASSWORD_MAX_AGE_DAYS` default 90) enforced whenever passwords are set/changed. Track `password_changed_at` on users and surface `must_change_password` in auth responses so the frontend can gate access until users rotate.
+- Rationale: Aligns with least-privilege goals and security review feedback; prevents weak credentials at creation time while letting existing accounts continue signing in until they update.
+- Consequences:
+  - New backend helper (`app/core/password_policy.py`) validates requirements and rejects weak passwords with structured `WEAK_PASSWORD` errors.
+  - Alembic migration adds + backfills `password_changed_at`.
+  - Login/refresh responses include `must_change_password`; `/users/me` mirrors it for UI gating.
+  - Frontend uses shared helper (`src/lib/passwordPolicy.ts`) + `PasswordRequirements` component to block weak passwords client-side and display violations.
+  - Docs + `.env.example` document the new env vars.
+
+## 2025-12-23 — Split database credentials (runtime vs migrations)
+- Decision: Replace the single `DB_USER`/`DB_PASSWORD` env vars with explicit runtime (`DB_APP_USER`/`DB_APP_PASSWORD`) and migrator (`DB_MIGRATOR_USER`/`DB_MIGRATOR_PASSWORD`) credentials. Runtime services connect via `settings.database_url`, while Alembic uses `settings.migrations_database_url`.
+- Rationale: Enforces least privilege so the application pool cannot perform DDL or escalate schema, while migrations retain the permissions they need.
+- Consequences:
+  - Config defaults fall back so existing setups keep working, but `.env.example`/docs now list both credential sets.
+  - Alembic `env.py` chooses the migrator URL (with app-user fallback for local prototyping).
+  - Frontend/backends unaffected except for configuration; docs and tooling (e.g., `tools/generate_env_example.py`) reflect the split.
+
 ---
 
 ## 2025-12-18 — User settings persisted on users table

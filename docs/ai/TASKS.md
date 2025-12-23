@@ -33,6 +33,13 @@
   - Default provider: `resend` (with fallback to `ses`, `gmail`/`smtp`)
   - Environment variable contract: `EMAIL_PROVIDER`, `FROM_EMAIL`, `RESEND_API_KEY`, `AWS_REGION`
   - Backend `.env.example` generated and documented
+- Strong password policy + rotation:
+  - Added `PASSWORD_MIN_LENGTH` / `PASSWORD_MAX_AGE_DAYS`, `password_changed_at`, and `must_change_password` responses.
+  - Backend enforces requirements (uppercase/lowercase/number/special/denylist/no email/name) when registering/changing passwords.
+  - Frontend mirrors the helper/UI requirements and blocks navigation until expired passwords are updated.
+- Database credential split:
+  - Replaced legacy `DB_USER`/`DB_PASSWORD` with `DB_APP_*` (runtime CRUD) and `DB_MIGRATOR_*` (DDL) env vars.
+  - Alembic + docs + `.env.example` now point at the migrator URL; runtime engine stays on the least-privilege user.
 - Phase 7: CI quality gate (GitHub Actions workflows for backend + frontend lint/test)
 - Phase 6: Automated tests added (backend + frontend; comprehensive coverage)
 - Phase 5: Standardize API error shape (align backend responses with `docs/api/error-format.md`)

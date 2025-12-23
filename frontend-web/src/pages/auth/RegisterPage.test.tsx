@@ -30,12 +30,48 @@ describe("RegisterPage", () => {
 
     await user.type(screen.getByPlaceholderText("Your name"), "Matt");
     await user.type(screen.getByPlaceholderText("you@example.com"), "matt@example.com");
-    await user.type(screen.getByPlaceholderText("Min 8 characters"), "Password_12345");
+    await user.type(screen.getByPlaceholderText(/At least/), "Password_12345");
     await user.type(screen.getByPlaceholderText("Repeat password"), "Password_12345");
     await user.click(screen.getByRole("button", { name: "Create account" }));
 
     expect(await screen.findByText("VerifyRoute")).toBeInTheDocument();
     expect((await screen.findAllByText("Registered. Please verify your email.")).length).toBeGreaterThan(0);
+  });
+
+  it("blocks weak passwords client-side and shows requirements", async () => {
+    const user = userEvent.setup();
+    renderWithRouter(<RegisterPage />, { route: "/register", path: "/register" });
+
+    await user.type(screen.getByPlaceholderText("Your name"), "Matt");
+    await user.type(screen.getByPlaceholderText("you@example.com"), "matt@example.com");
+    await user.type(screen.getByPlaceholderText(/At least/), "password");
+    await user.type(screen.getByPlaceholderText("Repeat password"), "password");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(api.registerUser).not.toHaveBeenCalled();
+    expect(screen.getAllByText(/At least 14 characters/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/At least 14 characters/).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Cannot be a common password")).length).toBeGreaterThan(0);
+  });
+
+  it("renders backend violations when API returns WEAK_PASSWORD", async () => {
+    const user = userEvent.setup();
+    api.registerUser.mockRejectedValueOnce(
+      Object.assign(new Error("weak"), {
+        detail: { code: "WEAK_PASSWORD", violations: ["uppercase", "number"] },
+      })
+    );
+
+    renderWithRouter(<RegisterPage />, { route: "/register", path: "/register" });
+
+    await user.type(screen.getByPlaceholderText("Your name"), "Matt");
+    await user.type(screen.getByPlaceholderText("you@example.com"), "matt@example.com");
+    await user.type(screen.getByPlaceholderText(/At least/), "Password_12345");
+    await user.type(screen.getByPlaceholderText("Repeat password"), "Password_12345");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(api.registerUser).toHaveBeenCalled();
+    expect((await screen.findAllByText("Cannot be a common password")).length).toBeGreaterThan(0);
   });
 
   it("blocks submission when passwords mismatch and shows toast", async () => {
@@ -44,7 +80,7 @@ describe("RegisterPage", () => {
 
     await user.type(screen.getByPlaceholderText("Your name"), "Matt");
     await user.type(screen.getByPlaceholderText("you@example.com"), "matt@example.com");
-    await user.type(screen.getByPlaceholderText("Min 8 characters"), "Password_12345");
+    await user.type(screen.getByPlaceholderText(/At least/), "Password_12345");
     await user.type(screen.getByPlaceholderText("Repeat password"), "Password_00000");
     await user.click(screen.getByRole("button", { name: "Create account" }));
 

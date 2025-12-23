@@ -1,10 +1,12 @@
 // src/pages/auth/RegisterPage.tsx
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
 import type { FormEvent } from "react";
 
 import { registerUser, resendVerification } from "../../api";
 import { useToast } from "../../components/ui/toast";
+import { evaluatePassword, describeViolation, PASSWORD_MIN_LENGTH, type PasswordViolation } from "../../lib/passwordPolicy";
+import PasswordRequirements from "../../components/forms/PasswordRequirements";
 
 function safeNext(nextRaw: string | null) {
   const v = (nextRaw || "").trim();
@@ -28,14 +30,31 @@ export default function RegisterPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [serverViolations, setServerViolations] = useState<PasswordViolation[]>([]);
+
+  const normalizedName = name.trim();
+  const normalizedEmail = email.trim().toLowerCase();
+
+  const clientViolations = useMemo(
+    () => evaluatePassword(password, { email: normalizedEmail, name: normalizedName }),
+    [password, normalizedEmail, normalizedName]
+  );
+  const violationSet = useMemo(
+    () => new Set<PasswordViolation>([...clientViolations, ...serverViolations]),
+    [clientViolations, serverViolations]
+  );
+
+  useEffect(() => {
+    setServerViolations([]);
+  }, [password, normalizedEmail, normalizedName]);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
     setMessage("");
 
-    const eName = name.trim();
-    const eEmail = email.trim().toLowerCase();
+    const eName = normalizedName;
+    const eEmail = normalizedEmail;
 
     if (!eName) {
       const msg = "Name is required.";
@@ -49,9 +68,10 @@ export default function RegisterPage() {
       toast.error(msg, "Register");
       return;
     }
-    if (password.length < 8) {
-      const msg = "Password must be at least 8 characters.";
+    if (clientViolations.length > 0) {
+      const msg = "Password does not meet requirements.";
       setError(msg);
+      setServerViolations(clientViolations);
       toast.error(msg, "Register");
       return;
     }
@@ -71,10 +91,18 @@ export default function RegisterPage() {
       // Send user to Verify page so they can resend if needed.
       nav(`/verify?email=${encodeURIComponent(eEmail)}&next=${encodeURIComponent(next)}`, { replace: true });
     } catch (err) {
-      const errObj = err as { message?: string } | null;
-      const msg = errObj?.message ?? "Registration failed";
-      setError(msg);
-      toast.error(msg, "Register");
+      const apiErr = err as { message?: string; detail?: { code?: string; violations?: string[] } } | null;
+      if (apiErr?.detail && apiErr.detail.code === "WEAK_PASSWORD") {
+        const violations = (apiErr.detail.violations ?? []) as PasswordViolation[];
+        setServerViolations(violations);
+        const msg = "Password does not meet requirements.";
+        setError(msg);
+        toast.error(msg, "Register");
+      } else {
+        const msg = apiErr?.message ?? "Registration failed";
+        setError(msg);
+        toast.error(msg, "Register");
+      }
     } finally {
       setBusy(false);
     }
@@ -136,13 +164,44 @@ export default function RegisterPage() {
 
         <div>
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Password</label>
-          <input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-slate-700" placeholder="Min 8 characters" disabled={busy} required />
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-slate-700"
+            placeholder={`At least ${PASSWORD_MIN_LENGTH} characters`}
+            disabled={busy}
+            required
+          />
         </div>
 
         <div>
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Confirm password</label>
-          <input type="password" autoComplete="new-password" value={password2} onChange={(e) => setPassword2(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-slate-700" placeholder="Repeat password" disabled={busy} required />
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={password2}
+            onChange={(e) => setPassword2(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-slate-700"
+            placeholder="Repeat password"
+            disabled={busy}
+            required
+          />
         </div>
+
+        <PasswordRequirements violations={violationSet} minLength={PASSWORD_MIN_LENGTH} />
+
+        {serverViolations.length > 0 && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+            <div className="font-semibold">Fix the following:</div>
+            <ul className="mt-1 list-disc pl-4">
+              {Array.from(new Set(serverViolations)).map((code) => (
+                <li key={code}>{describeViolation(code)}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <button type="submit" disabled={busy} className={[ "w-full rounded-lg px-3 py-2 text-sm font-semibold transition border", busy ? "cursor-not-allowed border-slate-300 bg-slate-100 text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-500" : "border-slate-300 bg-slate-900 text-white hover:bg-slate-800 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-100 dark:hover:bg-slate-800", ].join(" ")}>
           {busy ? "Creating account…" : "Create account"}

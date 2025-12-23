@@ -66,25 +66,34 @@ function buildHeaders(options: JsonRequestOptions = {}, { includeAuth = true } =
   return headers;
 }
 
-async function parseError(res: Response): Promise<string> {
+type ParsedError = { message: string; detail?: unknown };
+
+async function parseError(res: Response): Promise<ParsedError> {
   const contentType = res.headers.get("content-type") || "";
+  const fallback = `HTTP ${res.status} ${res.statusText}`;
 
   if (contentType.includes("application/json")) {
     try {
       const data: unknown = await res.json();
       if (typeof data === "object" && data) {
         const obj = data as Record<string, unknown>;
-        const msg = obj.detail ?? obj.message;
-        if (typeof msg === "string" && msg) return msg;
+        const structuredDetail = obj.details ?? obj.detail;
+        if (typeof structuredDetail === "string" && structuredDetail) return { message: structuredDetail, detail: structuredDetail };
+        if (structuredDetail && typeof structuredDetail === "object") {
+          const msg = typeof obj.message === "string" && obj.message ? obj.message : fallback;
+          return { message: msg, detail: structuredDetail };
+        }
+        const msg = obj.message;
+        if (typeof msg === "string" && msg) return { message: msg, detail: structuredDetail };
       }
-      return `HTTP ${res.status} ${res.statusText}`;
+      return { message: fallback };
     } catch {
       // fall through
     }
   }
 
   const text = await res.text().catch(() => "");
-  return text || `HTTP ${res.status} ${res.statusText}`;
+  return { message: text || fallback };
 }
 
 /** -------------------
@@ -164,8 +173,11 @@ async function requestJson<T = unknown>(path: string, options: JsonRequestOption
   }
 
   if (!res.ok) {
-    const msg = await parseError(res);
-    throw new Error(msg);
+    const { message, detail } = await parseError(res);
+    const error = new Error(message) as Error & { detail?: unknown; status?: number };
+    if (detail !== undefined) error.detail = detail;
+    error.status = res.status;
+    throw error;
   }
 
   if (res.status === 204) return null as T;
@@ -204,8 +216,11 @@ async function requestVoid(path: string, options: JsonRequestOptions = {}): Prom
   }
 
   if (!res.ok) {
-    const msg = await parseError(res);
-    throw new Error(msg);
+    const { message, detail } = await parseError(res);
+    const error = new Error(message) as Error & { detail?: unknown; status?: number };
+    if (detail !== undefined) error.detail = detail;
+    error.status = res.status;
+    throw error;
   }
 }
 

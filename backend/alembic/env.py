@@ -35,7 +35,8 @@ if settings.DB_MIGRATOR_USER and settings.DB_MIGRATOR_PASSWORD:
 else:
     migrations_url = settings.database_url
 
-config.set_main_option("sqlalchemy.url", migrations_url)
+# ConfigParser treats "%" as interpolation markers; escape them for the .ini writer.
+config.set_main_option("sqlalchemy.url", migrations_url.replace("%", "%%"))
 
 # add your model's MetaData object here
 # for 'autogenerate' support

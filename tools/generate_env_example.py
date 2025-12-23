@@ -53,6 +53,7 @@ ALLOWED_PREFIXES = (
     "ENABLE_",
     "DOC_",
     "MAX_",
+    "PASSWORD_",
 )
 
 ALLOWED_EXACT = {"ENV"}
@@ -67,7 +68,16 @@ class Group:
 
 GROUPS: list[Group] = [
     Group("General", "General environment switches.", ("ENV",)),
-    Group("Database (Postgres)", "Backend database connection.", ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSLMODE")),
+    Group(
+        "Database (Postgres)",
+        "Backend database connection.",
+        ("DB_HOST", "DB_PORT", "DB_NAME", "DB_APP_USER", "DB_APP_PASSWORD", "DB_MIGRATOR_USER", "DB_MIGRATOR_PASSWORD", "DB_SSLMODE"),
+    ),
+    Group(
+        "Password policy",
+        "Password complexity + rotation controls.",
+        ("PASSWORD_MIN_LENGTH", "PASSWORD_MAX_AGE_DAYS"),
+    ),
     Group("CORS", "Comma-separated list of allowed origins for the backend.", ("CORS_ORIGINS",)),
     Group("Auth / JWT", "Backend authentication settings.", ("JWT_SECRET", "JWT_ALGORITHM", "ACCESS_TOKEN_EXPIRE_MINUTES")),
     Group(

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.password_policy import ensure_strong_password, mark_password_changed, password_is_expired
 from app.core.security import hash_password, verify_password
 from app.dependencies.auth import get_current_user
 from app.models.refresh_token import RefreshToken
@@ -17,8 +18,17 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.get("/me", response_model=UserMeOut)
-def get_me(user: User = Depends(get_current_user)) -> User:
-    return user
+def get_me(user: User = Depends(get_current_user)) -> UserMeOut:
+    return UserMeOut(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        auto_refresh_seconds=user.auto_refresh_seconds,
+        is_email_verified=user.is_email_verified,
+        created_at=user.created_at,
+        email_verified_at=user.email_verified_at,
+        must_change_password=password_is_expired(user),
+    )
 
 
 @router.get("/me/settings", response_model=UserSettingsOut)
@@ -57,8 +67,11 @@ def change_password(
             detail="New password must be different from current password",
         )
 
+    ensure_strong_password(payload.new_password, email=user.email, username=user.name)
+
     # Update password hash
     user.password_hash = hash_password(payload.new_password)
+    mark_password_changed(user)
     db.add(user)
 
     # Revoke all refresh tokens (forces re-login everywhere)

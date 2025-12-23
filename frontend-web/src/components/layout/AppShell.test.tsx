@@ -71,6 +71,29 @@ describe("AppShell", () => {
     expect(onLogout).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("Login")).toBeInTheDocument();
   });
+
+  it("redirects to change password when user must rotate credentials", async () => {
+    currentUser.useCurrentUser.mockReturnValueOnce({
+      user: { name: "Matt", email: "matt@example.com", must_change_password: true },
+      isStub: false,
+      loading: false,
+      error: "",
+      reload: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/jobs"]}>
+        <Routes>
+          <Route element={<AppShell onLogout={() => {}} />}>
+            <Route path="/jobs" element={<div>Jobs</div>} />
+            <Route path="/change-password" element={<div>ChangePasswordRoute</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("ChangePasswordRoute")).toBeInTheDocument();
+  });
 });
 
 

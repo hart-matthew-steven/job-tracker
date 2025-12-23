@@ -42,6 +42,24 @@ describe("LoginPage", () => {
     expect(await screen.findByText("JobsRoute")).toBeInTheDocument();
   });
 
+  it("redirects to change password when API signals expiration", async () => {
+    const user = userEvent.setup();
+    api.loginUser.mockResolvedValueOnce({ access_token: "t_access", must_change_password: true });
+
+    renderWithRouter(<LoginPage />, {
+      route: "/login",
+      path: "/login",
+      extraRoutes: [{ path: "/change-password", element: <div>ChangePasswordRoute</div> }],
+    });
+
+    await user.type(screen.getByPlaceholderText("you@example.com"), "me@example.com");
+    await user.type(screen.getByPlaceholderText("••••••••"), "Password_12345");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(auth.setSession).toHaveBeenCalledWith("t_access");
+    expect(await screen.findByText("ChangePasswordRoute")).toBeInTheDocument();
+  });
+
   it("shows toast on login failure", async () => {
     const user = userEvent.setup();
     api.loginUser.mockRejectedValueOnce(new Error("Invalid email or password"));

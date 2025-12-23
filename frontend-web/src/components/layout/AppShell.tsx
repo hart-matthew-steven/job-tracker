@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { ROUTES } from "../../routes/paths";
+import type { UserMeOut } from "../../types/api";
 
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -33,10 +34,9 @@ function AppNavLink({ to, children, onNavigate }: AppNavLinkProps) {
   );
 }
 
-type AccountMenuProps = { onLogout: () => void };
+type AccountMenuProps = { onLogout: () => void; user: UserMeOut | null; isStub: boolean };
 
-function AccountMenu({ onLogout }: AccountMenuProps) {
-  const { user, isStub } = useCurrentUser();
+function AccountMenu({ onLogout, user, isStub }: AccountMenuProps) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -165,9 +165,16 @@ function AccountMenu({ onLogout }: AccountMenuProps) {
 type Props = { onLogout?: () => void | Promise<void> };
 
 export default function AppShell({ onLogout }: Props) {
+  const currentUser = useCurrentUser();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const nav = useNavigate();
+  const location = useLocation();
+  const mustChangePassword = !!currentUser.user?.must_change_password;
+
+  if (!currentUser.loading && mustChangePassword && location.pathname !== ROUTES.changePassword) {
+    return <Navigate to={ROUTES.changePassword} replace />;
+  }
 
   async function handleLogout() {
     if (logoutBusy) return;
@@ -216,7 +223,7 @@ export default function AppShell({ onLogout }: Props) {
             </div>
 
             <div className="flex items-center gap-3">
-              <AccountMenu onLogout={() => void handleLogout()} />
+              <AccountMenu onLogout={() => void handleLogout()} user={currentUser.user} isStub={currentUser.isStub} />
             </div>
           </div>
         </div>

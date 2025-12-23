@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 
 # Ensure JWT_SECRET exists before importing app.main (it calls require_jwt_secret() at import time).
 os.environ.setdefault("JWT_SECRET", "test_jwt_secret")
@@ -92,6 +93,8 @@ def _reset_mutable_settings():
         "MAX_PENDING_UPLOADS_PER_JOB",
         "DOC_SCAN_SHARED_SECRET",
         "ENABLE_RATE_LIMITING",
+        "PASSWORD_MIN_LENGTH",
+        "PASSWORD_MAX_AGE_DAYS",
     ]
     original = {k: getattr(app_config.settings, k) for k in keys}
     try:
@@ -138,6 +141,7 @@ def users(db_session):
         password_hash=hash_password("test_password_123"),
         is_active=True,
         is_email_verified=True,
+        password_changed_at=datetime.now(timezone.utc),
     )
     user_b = User(
         email="other@example.com",
@@ -145,6 +149,7 @@ def users(db_session):
         password_hash=hash_password("test_password_123"),
         is_active=True,
         is_email_verified=True,
+        password_changed_at=datetime.now(timezone.utc),
     )
     db_session.add_all([user_a, user_b])
     db_session.commit()

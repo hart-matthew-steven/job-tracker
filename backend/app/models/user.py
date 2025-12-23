@@ -23,6 +23,7 @@ class User(Base):
     # User preference: data retention in days (0 = keep forever)
     data_retention_days = Column(Integer, nullable=False, server_default="0")
     password_hash = Column(String(255), nullable=False)
+    password_changed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     is_active = Column(Boolean, nullable=False, server_default="true")
     is_email_verified = Column(Boolean, nullable=False, server_default="false")

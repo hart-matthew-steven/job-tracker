@@ -3,7 +3,7 @@ export type MessageOut = { message: string };
 // -------- Auth --------
 export type RegisterIn = { email: string; password: string; name?: string | null };
 export type LoginIn = { email: string; password: string };
-export type LoginOut = { access_token: string; token_type?: string };
+export type LoginOut = { access_token: string; token_type?: string; must_change_password?: boolean };
 export type ResendVerificationIn = { email: string };
 
 // -------- Users / Settings --------
@@ -15,6 +15,7 @@ export type UserMeOut = {
   is_email_verified: boolean;
   created_at: string;
   email_verified_at?: string | null;
+  must_change_password?: boolean;
 };
 
 export type UserSettingsOut = {
