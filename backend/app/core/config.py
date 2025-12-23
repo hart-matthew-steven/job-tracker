@@ -33,8 +33,10 @@ class Settings:
     DB_HOST = os.getenv("DB_HOST", "")
     DB_PORT = os.getenv("DB_PORT", "5432")
     DB_NAME = os.getenv("DB_NAME", "")
-    DB_USER = os.getenv("DB_USER", "")
-    DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+    DB_APP_USER = os.getenv("DB_APP_USER", "")
+    DB_APP_PASSWORD = os.getenv("DB_APP_PASSWORD", "")
+    DB_MIGRATOR_USER = os.getenv("DB_MIGRATOR_USER", "")
+    DB_MIGRATOR_PASSWORD = os.getenv("DB_MIGRATOR_PASSWORD", "")
     DB_SSLMODE = os.getenv("DB_SSLMODE", "require")
 
     # CORS (CSV)
@@ -104,14 +106,21 @@ class Settings:
     # Used by: resend
     RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 
-    @property
-    def database_url(self) -> str:
-        encoded_password = quote_plus(self.DB_PASSWORD)
+    def _build_database_url(self, user: str, password: str) -> str:
+        encoded_password = quote_plus(password)
         return (
-            f"postgresql+psycopg2://{self.DB_USER}:{encoded_password}"
+            f"postgresql+psycopg2://{user}:{encoded_password}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
             f"?sslmode={self.DB_SSLMODE}"
         )
+
+    @property
+    def database_url(self) -> str:
+        return self._build_database_url(self.DB_APP_USER, self.DB_APP_PASSWORD)
+
+    @property
+    def migrations_database_url(self) -> str:
+        return self._build_database_url(self.DB_MIGRATOR_USER, self.DB_MIGRATOR_PASSWORD)
 
     @property
     def is_prod(self) -> bool:
