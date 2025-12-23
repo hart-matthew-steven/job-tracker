@@ -17,6 +17,7 @@ This document describes the backend structure and conventions at a high level.
 - Runtime traffic uses `DB_APP_USER` / `DB_APP_PASSWORD`. This account is limited to data reads/writes and intentionally blocked from `CREATE TABLE` / `ALTER TABLE`.
 - Schema changes run through Alembic using `DB_MIGRATOR_USER` / `DB_MIGRATOR_PASSWORD`, the only credentials with DDL privileges.
 - Two discrete URLs exist in config: `database_url` (app) and `migrations_database_url` (Alembic). This protects production data by enforcing least privilege and keeps migrations auditable.
+- Legacy `DB_USER` / `DB_PASSWORD` configuration has been removed; always supply both credential sets explicitly.
 
 ---
 

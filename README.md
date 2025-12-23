@@ -175,6 +175,7 @@ This repo includes a generated `backend/.env.example` (**names only**, no values
 - Alembic migrations use `DB_MIGRATOR_USER` / `DB_MIGRATOR_PASSWORD`. This user holds the elevated privileges needed for schema changes and should be used only during deploys or manual migration runs.
 - The backend exposes two URLs via config: `database_url` (app user) and `migrations_database_url` (migrator). Always select the one that matches the task you are running.
 - Local development should create both roles, even if they initially share the same password, to mirror production least-privilege behavior.
+- Legacy `DB_USER` / `DB_PASSWORD` vars have been removed; define both `DB_APP_*` and `DB_MIGRATOR_*` explicitly.
 
 ### Email providers
 

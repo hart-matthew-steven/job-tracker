@@ -41,6 +41,7 @@ Do not document secret values.
 - This split enforces least privilege so accidental schema changes cannot happen from the web app connection pool.
 - Local development should provision both roles even if they point to the same database instance; grant the migrator role the additional `CREATE` / `ALTER` privileges only.
 - Alembic (and any manual migration commands) must source `migrations_database_url`, while the application server keeps using `database_url` so it never escalates privileges.
+- Legacy single-user vars (`DB_USER`, `DB_PASSWORD`) have been removed to make the separation explicit.
 
 ### Email configuration (backend)
 
