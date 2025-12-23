@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 import logging
 import uuid
-import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from sqlalchemy.orm import Session
 
@@ -33,7 +32,6 @@ from app.services.documents import (
 )
 
 router = APIRouter(prefix="/jobs", tags=["documents"], dependencies=[Depends(get_current_user)])
-logger = logging.getLogger(__name__)
 logger = logging.getLogger(__name__)
 
 
