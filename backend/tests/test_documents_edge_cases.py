@@ -108,6 +108,7 @@ def test_infected_scan_blocks_download_and_sets_status(client):
     )
     assert res2.status_code == 200
 
+    app_config.settings.GUARD_DUTY_ENABLED = True
     app_config.settings.DOC_SCAN_SHARED_SECRET = "scan_secret"
     res3 = client.post(
         f"/jobs/{job['id']}/documents/scan-result",

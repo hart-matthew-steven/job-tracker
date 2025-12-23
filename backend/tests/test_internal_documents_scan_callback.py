@@ -22,6 +22,7 @@ def _create_doc(client, job_id: int):
 
 
 def test_internal_scan_result_requires_secret(client):
+    app_config.settings.GUARD_DUTY_ENABLED = True
     app_config.settings.DOC_SCAN_SHARED_SECRET = "scan_secret"
 
     job = _create_job(client)
@@ -44,6 +45,7 @@ def test_internal_scan_result_requires_secret(client):
 
 
 def test_internal_scan_result_clean_then_idempotent(client):
+    app_config.settings.GUARD_DUTY_ENABLED = True
     app_config.settings.DOC_SCAN_SHARED_SECRET = "scan_secret"
 
     job = _create_job(client)
@@ -71,6 +73,7 @@ def test_internal_scan_result_clean_then_idempotent(client):
 
 
 def test_internal_scan_result_infected_keeps_db_row_and_allows_quarantine_key_fill(client):
+    app_config.settings.GUARD_DUTY_ENABLED = True
     app_config.settings.DOC_SCAN_SHARED_SECRET = "scan_secret"
 
     job = _create_job(client)
@@ -96,6 +99,7 @@ def test_internal_scan_result_infected_keeps_db_row_and_allows_quarantine_key_fi
 
 
 def test_internal_scan_result_truncates_overlong_scan_message(client):
+    app_config.settings.GUARD_DUTY_ENABLED = True
     app_config.settings.DOC_SCAN_SHARED_SECRET = "scan_secret"
 
     job = _create_job(client)

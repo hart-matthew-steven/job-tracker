@@ -197,6 +197,10 @@ def send_email(to_email: str, subject: str, body: str) -> str | None:
     - EMAIL_PROVIDER=gmail: SMTP via stdlib (preserves SMTP_FROM_EMAIL From behavior)
     - EMAIL_PROVIDER=smtp: legacy alias for gmail
     """
+    if not settings.EMAIL_ENABLED:
+        logger.info("Email disabled (EMAIL_ENABLED=false); skipping send to=%s subject=%s", to_email, subject)
+        return None
+
     provider = _normalize_provider(settings.EMAIL_PROVIDER)
     if provider == "gmail":
         _send_email_smtp(to_email=to_email, subject=subject, body=body)

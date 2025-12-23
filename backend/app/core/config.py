@@ -109,6 +109,8 @@ class Settings:
     FROM_EMAIL = os.getenv("FROM_EMAIL", "")
     # Used by: resend
     RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+    EMAIL_ENABLED = str_to_bool(os.getenv("EMAIL_ENABLED"), default=False)
+    GUARD_DUTY_ENABLED = str_to_bool(os.getenv("GUARD_DUTY_ENABLED"), default=False)
 
     def _build_database_url(self, user: str, password: str) -> str:
         encoded_password = quote_plus(password)
