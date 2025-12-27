@@ -27,12 +27,26 @@ import type {
   PatchInterviewIn,
 } from "./types/api";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://matts-macbook.local:8000").replace(
-  /\/$/,
-  ""
-);
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
 const TOKEN_KEY = "access_token";
+type LogoutListener = () => void;
+const logoutListeners = new Set<LogoutListener>();
+
+export function subscribeToUnauthorizedLogout(listener: LogoutListener): () => void {
+  logoutListeners.add(listener);
+  return () => logoutListeners.delete(listener);
+}
+
+function notifyUnauthorizedLogout() {
+  logoutListeners.forEach((fn) => {
+    try {
+      fn();
+    } catch {
+      // ignore listener errors
+    }
+  });
+}
 
 export function setAccessToken(token: string | null): void {
   if (!token) localStorage.removeItem(TOKEN_KEY);
@@ -169,10 +183,16 @@ async function requestJson<T = unknown>(path: string, options: JsonRequestOption
       res = await doFetch(retryHeaders);
     } else {
       logout();
+      notifyUnauthorizedLogout();
     }
   }
 
   if (!res.ok) {
+    if (res.status === 401) {
+      logout();
+      notifyUnauthorizedLogout();
+    }
+
     const { message, detail } = await parseError(res);
     const error = new Error(message) as Error & { detail?: unknown; status?: number };
     if (detail !== undefined) error.detail = detail;

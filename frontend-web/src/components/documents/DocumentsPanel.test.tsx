@@ -151,8 +151,7 @@ describe("DocumentsPanel", () => {
     api.presignDocumentDownload.mockRejectedValueOnce(new Error("Document is not ready to download yet"));
 
     // Prevent window.open from erroring in test env.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).open = vi.fn();
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
 
     renderPanel();
 
@@ -161,6 +160,8 @@ describe("DocumentsPanel", () => {
 
     await waitFor(() => expect(api.presignDocumentDownload).toHaveBeenCalledWith(1, 55));
     expect((await screen.findAllByText("Document is not ready to download yet")).length).toBeGreaterThan(0);
+
+    openSpy.mockRestore();
   });
 });
 

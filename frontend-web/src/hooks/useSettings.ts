@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getMySettings, updateMySettings } from "../api";
+import { applyThemeToDocument, normalizeTheme, saveThemePreference } from "../lib/theme";
 import type { UpdateSettingsIn, UserSettingsOut } from "../types/api";
 
 export type SettingsState = {
@@ -22,23 +23,6 @@ export type UseSettingsResult = {
   setDataRetentionDays: (days: number) => Promise<void>;
 };
 
-function applyThemeToDocument(rawTheme: string) {
-  const desired = String(rawTheme || "dark").trim().toLowerCase() || "dark";
-
-  function apply(theme: "dark" | "light") {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-    document.documentElement.setAttribute("data-theme", theme);
-  }
-
-  if (desired === "system") {
-    const m = window.matchMedia?.("(prefers-color-scheme: dark)");
-    apply(m?.matches ? "dark" : "light");
-    return;
-  }
-
-  apply(desired === "light" ? "light" : "dark");
-}
-
 export function useSettings(): UseSettingsResult {
   const [settings, setSettings] = useState<SettingsState>({
     autoRefreshSeconds: 0,
@@ -55,9 +39,11 @@ export function useSettings(): UseSettingsResult {
     setLoading(true);
     try {
       const res: UserSettingsOut = await getMySettings();
+      const theme = normalizeTheme(res?.theme);
+      saveThemePreference(theme);
       setSettings({
         autoRefreshSeconds: Number(res?.auto_refresh_seconds ?? 0) || 0,
-        theme: String(res?.theme ?? "dark") || "dark",
+        theme,
         defaultJobsSort: String(res?.default_jobs_sort ?? "updated_desc") || "updated_desc",
         defaultJobsView: String(res?.default_jobs_view ?? "all") || "all",
         dataRetentionDays: Number(res?.data_retention_days ?? 0) || 0,
@@ -72,6 +58,7 @@ export function useSettings(): UseSettingsResult {
         defaultJobsView: "all",
         dataRetentionDays: 0,
       });
+      saveThemePreference("dark");
     } finally {
       setLoading(false);
     }
@@ -134,8 +121,9 @@ export function useSettings(): UseSettingsResult {
         })(),
       setTheme: (theme: string) =>
         (async () => {
-          const next = String(theme || "dark").trim().toLowerCase() || "dark";
+          const next = normalizeTheme(theme);
           setSettings((prev) => ({ ...prev, theme: next }));
+          saveThemePreference(next);
           try {
             const payload: UpdateSettingsIn = {
               auto_refresh_seconds: settings.autoRefreshSeconds,

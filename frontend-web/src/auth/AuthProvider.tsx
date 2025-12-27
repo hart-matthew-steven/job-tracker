@@ -1,7 +1,7 @@
 // src/auth/AuthProvider.tsx
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useEffect, useState } from "react";
-import { getAccessToken, setAccessToken, logoutUser } from "../api";
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { getAccessToken, setAccessToken, logoutUser, subscribeToUnauthorizedLogout } from "../api";
 
 export type AuthContextValue = {
     token: string | null;
@@ -38,16 +38,31 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     const [token, setToken] = useState<string | null>(() => getAccessToken());
     const [isReady, setIsReady] = useState(false);
 
+    const markJustLoggedOut = useCallback(() => {
+        try {
+            sessionStorage.setItem("jt.justLoggedOut", "1");
+        } catch {
+            // ignore
+        }
+    }, []);
+
     // Hydrate token from localStorage on app start + keep tab state in sync
     useEffect(() => {
         const sync = () => setToken(getAccessToken());
         sync();
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setIsReady(true);
-
+        const readyTimer = window.setTimeout(() => setIsReady(true), 0);
         window.addEventListener("storage", sync);
-        return () => window.removeEventListener("storage", sync);
-    }, []);
+        const unsubscribe = subscribeToUnauthorizedLogout(() => {
+            markJustLoggedOut();
+            setAccessToken(null);
+            setToken(null);
+        });
+        return () => {
+            window.removeEventListener("storage", sync);
+            unsubscribe();
+            clearTimeout(readyTimer);
+        };
+    }, [markJustLoggedOut]);
 
     function setSession(newToken: string | null) {
         setAccessToken(newToken);
@@ -56,15 +71,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
 
     // Phase 2: server logout (revokes refresh token cookie + clears local token in api.js)
     async function logout() {
-        // Mark that the next unauth redirect should go straight to /login (no `next=`).
-        // This avoids confusing post-logout redirects like /login?next=/jobs.
-        try {
-            sessionStorage.setItem("jt.justLoggedOut", "1");
-        } catch {
-            // ignore
-        }
-
-        // Clear local auth immediately so UI updates reliably even if API call hangs/fails.
+        markJustLoggedOut();
         setAccessToken(null);
         setToken(null);
 
@@ -89,7 +96,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
      * NOTE: api.js already does refresh-on-401 + retry.
      */
     async function authFetch(path: string, options: RequestInit & { headers?: Record<string, string> } = {}) {
-        const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? "http://matts-macbook.local:8000").replace(/\/$/, "");
+        const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
         const headers = {
             ...(options.headers ?? {}),

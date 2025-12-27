@@ -72,6 +72,7 @@ def change_password(
     # Update password hash
     user.password_hash = hash_password(payload.new_password)
     mark_password_changed(user)
+    user.token_version = int((user.token_version or 0) + 1)
     db.add(user)
 
     # Revoke all refresh tokens (forces re-login everywhere)

@@ -32,14 +32,14 @@ describe("VerifyEmailPage", () => {
     vi.useRealTimers();
   });
 
-  it("shows error toast when token is missing", async () => {
+  it("shows informational message when token is missing but email is known", async () => {
     renderWithRouter(<VerifyEmailPage />, {
       route: "/verify?email=a%40b.com&next=%2Fjobs",
       path: "/verify",
     });
 
     expect(
-      (await screen.findAllByText("Missing verification token. Please use the link from your email.")).length
+      (await screen.findAllByText("We emailed a verification link to a@b.com. Check your inbox or resend it below.")).length
     ).toBeGreaterThan(0);
     expect(api.verifyEmail).not.toHaveBeenCalled();
   });

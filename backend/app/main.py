@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings, require_jwt_secret
-from app.core.rate_limit import limiter 
+from app.core.rate_limit import limiter
 from app.routes.auth import router as auth_router
 from app.routes.job_applications import router as jobs_router
 from app.routes.notes import router as notes_router
@@ -18,18 +18,49 @@ from app.routes.activity import router as activity_router
 from app.routes.interviews import router as interviews_router
 from app.routes.internal_documents import router as internal_documents_router
 
-logger = logging.getLogger(__name__)
 
-require_jwt_secret()
-
-app = FastAPI(title="Job Application Tracker")
-logger.info(
-    "Startup config: EMAIL_ENABLED=%s provider=%s GUARD_DUTY_ENABLED=%s",
-    settings.EMAIL_ENABLED,
-    (settings.EMAIL_PROVIDER or "resend"),
-    settings.GUARD_DUTY_ENABLED,
+# -------------------------------------------------------------------
+# Logging (must be configured BEFORE anything else)
+# -------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 
+logger = logging.getLogger(__name__)
+
+
+# -------------------------------------------------------------------
+# App initialization
+# -------------------------------------------------------------------
+app = FastAPI(title="Job Application Tracker")
+
+
+# -------------------------------------------------------------------
+# Startup
+# -------------------------------------------------------------------
+@app.on_event("startup")
+async def startup_event() -> None:
+    try:
+        logger.info("Starting Job Tracker API (ENV=%s)", settings.ENV)
+
+        # Fail fast but log clearly if misconfigured
+        require_jwt_secret()
+
+        logger.info(
+            "Startup config: EMAIL_ENABLED=%s provider=%s GUARD_DUTY_ENABLED=%s",
+            settings.EMAIL_ENABLED,
+            settings.EMAIL_PROVIDER,
+            settings.GUARD_DUTY_ENABLED,
+        )
+    except Exception:
+        logger.exception("Startup failed")
+        raise
+
+
+# -------------------------------------------------------------------
+# Error handling
+# -------------------------------------------------------------------
 _ERROR_CODE_BY_STATUS: dict[int, str] = {
     400: "VALIDATION_ERROR",
     401: "UNAUTHORIZED",
@@ -48,7 +79,7 @@ def _error_code(status_code: int) -> str:
 
 
 @app.exception_handler(HTTPException)
-def http_exception_handler(request: Request, exc: HTTPException):  # noqa: ARG001
+def http_exception_handler(request: Request, exc: HTTPException):
     detail = exc.detail
     message: str
     details: dict | None = None
@@ -71,7 +102,7 @@ def http_exception_handler(request: Request, exc: HTTPException):  # noqa: ARG00
 
 
 @app.exception_handler(RequestValidationError)
-def validation_exception_handler(request: Request, exc: RequestValidationError):  # noqa: ARG001
+def validation_exception_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(
         status_code=422,
         content={
@@ -82,17 +113,23 @@ def validation_exception_handler(request: Request, exc: RequestValidationError):
     )
 
 
+# -------------------------------------------------------------------
+# Rate limiting (optional)
+# -------------------------------------------------------------------
 if settings.ENABLE_RATE_LIMITING:
     app.state.limiter = limiter
-    # Provide our standard error shape for rate limits, instead of slowapi's default.
     app.add_exception_handler(
         RateLimitExceeded,
-        lambda request, exc: JSONResponse(  # noqa: ARG005
+        lambda request, exc: JSONResponse(
             status_code=429,
             content={"error": "RATE_LIMITED", "message": "Too many requests"},
         ),
     )
 
+
+# -------------------------------------------------------------------
+# Middleware
+# -------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -101,6 +138,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# -------------------------------------------------------------------
+# Routers
+# -------------------------------------------------------------------
 app.include_router(auth_router)
 app.include_router(jobs_router)
 app.include_router(notes_router)
@@ -111,6 +152,11 @@ app.include_router(activity_router)
 app.include_router(interviews_router)
 app.include_router(internal_documents_router)
 
+
+# -------------------------------------------------------------------
+# Health check (used by App Runner)
+# -------------------------------------------------------------------
 @app.get("/health")
 def health_check():
+    logger.info("Health check OK")
     return {"status": "ok"}

@@ -36,6 +36,8 @@ Keep it concise, factual, and employer-facing.
 - Email delivery:
   - Provider default is **Resend** (when `EMAIL_PROVIDER` is unset).
   - Supported providers: `resend` (default), `ses`, `gmail` (SMTP); legacy alias `smtp` → `gmail`.
+- Email verification:
+  - Tokens are JWTs with single-use IDs stored in `email_verification_tokens`; clicking a link consumes the record so resends invalidate prior links automatically.
 - Password policy:
   - Configurable via `PASSWORD_MIN_LENGTH` (default 14) and `PASSWORD_MAX_AGE_DAYS` (default 90).
   - `app/core/password_policy.py` enforces requirements (length, upper/lowercase, number, special char, denylist, no email/name).
@@ -44,8 +46,14 @@ Keep it concise, factual, and employer-facing.
   - Runtime API connects with `DB_APP_USER` / `DB_APP_PASSWORD` (CRUD-only).
   - Alembic migrations run with `DB_MIGRATOR_USER` / `DB_MIGRATOR_PASSWORD` (DDL).
   - Config exposes both URLs (`database_url`, `migrations_database_url`), keeping least privilege enforced in prod and dev.
+- Optional integrations:
+  - `EMAIL_ENABLED` and `GUARD_DUTY_ENABLED` gate external dependencies; when disabled (default in Docker), email send + GuardDuty callbacks noop safely.
+- Deployment:
+  - Production backend runs on AWS App Runner behind `https://api.jobapptracker.dev`, pulling ECR images built with `docker buildx --platform linux/amd64` and loading secrets from AWS Secrets Manager.
 - Documents:
   - Presigned S3 upload flow implemented (presign → upload to S3 → confirm).
+ - Auth tokens:
+   - Access tokens include a `token_version`, letting the backend invalidate sessions by incrementing the column (e.g., on password change). Refresh tokens are still revoked server-side.
 
 ## What Is Working
 - Registration → email verification link → verification → login.
@@ -63,6 +71,9 @@ Keep it concise, factual, and employer-facing.
 - CI quality gate (tests/lint/typecheck required before merge) partially implemented:
   - GitHub Actions workflows added (backend + frontend)
   - Branch protection still needs to be enabled in GitHub settings to block merges
+- Deployment automation:
+  - Need CI/CD to build/push the backend image to ECR and trigger App Runner deploys on merge to `main`.
+  - Frontend hosting pipeline still TBD; plan is to stand up AWS hosting and automate deploys once strategy is picked.
 - Document malware scanning fully implemented:
   - **AWS GuardDuty Malware Protection for S3** is the production scan engine.
   - EventBridge triggers a Lambda forwarder (`lambda/guardduty_scan_forwarder/`).
@@ -71,7 +82,10 @@ Keep it concise, factual, and employer-facing.
   - Backend updates DB `scan_status` (PENDING → CLEAN/INFECTED/ERROR) and blocks downloads unless CLEAN.
   - Frontend polls for status updates and displays scan state.
   - Backend can still be exposed via ngrok for local dev/testing.
-- Production AWS deployment hardening is explicitly deferred until requested.
+- Production AWS deployment hardening is in progress: runtime now lives on App Runner, but logging/alerting/secret rotation automation is still pending.
+- Feature roadmap:
+  - AI copilot to tailor resumes vs job descriptions, generate cover/thank-you letters, and upload artifacts to the relevant job automatically.
+  - Multi-factor authentication and passkey support; long-term, Face ID login for the future iOS client.
 
 ## Known Issues / Notes
 - SES deliverability: verification emails may land in spam depending on sender identity/domain posture.
@@ -107,6 +121,10 @@ Keep it concise, factual, and employer-facing.
   - Default provider is `resend` with Resend Python SDK.
   - Env vars: `FROM_EMAIL` (ses/resend only), `RESEND_API_KEY`, `AWS_REGION` for SES.
   - Backend env var example is generated at `backend/.env.example` via `tools/generate_env_example.py`.
+- Hosting upgrade:
+  - Backend Dockerfile + README updated for App Runner (ECR build/push commands, `--platform linux/amd64` requirement, secrets from AWS Secrets Manager, health checks hitting `/health`).
+- GuardDuty + email gating:
+  - Introduced `EMAIL_ENABLED` / `GUARD_DUTY_ENABLED` feature flags so local Docker can run without external services; added noop handlers + test coverage.
 - Password policy + rotation:
   - Added password policy helper + env vars, enforced at registration/change flows.
   - Alembic migration backfilled `password_changed_at`; auth responses expose `must_change_password`.

@@ -12,7 +12,6 @@ from app.core.security import (
     hash_password,
     verify_password,
     create_access_token,
-    create_email_verification_token,
     verify_token_purpose,
 )
 from app.core.password_policy import ensure_strong_password, mark_password_changed, password_is_expired
@@ -26,6 +25,10 @@ from app.schemas.auth import (
     VerifyOut,
 )
 from app.services.email import EmailDeliveryError, EmailNotConfiguredError, send_email
+from app.services.email_verification import (
+    consume_email_verification_token,
+    issue_email_verification_token,
+)
 from app.services.refresh_tokens import (
     clear_refresh_cookie,
     get_valid_refresh_token,
@@ -95,10 +98,9 @@ def register(payload: RegisterIn, db: Session = Depends(get_db)):
     )
     mark_password_changed(user)
     db.add(user)
-    # Only commit user after verification email send succeeds.
     db.flush()
     try:
-        token = create_email_verification_token(email=email)
+        token = issue_email_verification_token(db, user)
         send_verification_email(email, token)
         db.commit()
     except Exception:
@@ -126,7 +128,17 @@ def verify_email(token: str, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User is inactive")
 
+    jti = payload.get("jti")
+    if not jti:
+        raise HTTPException(status_code=400, detail="Invalid token payload")
+
+    try:
+        consume_email_verification_token(db, user, jti)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     if user.is_email_verified:
+        db.commit()
         return {"message": "Email already verified"}
 
     user.is_email_verified = True
@@ -150,8 +162,13 @@ def resend_verification(payload: ResendVerifyIn, db: Session = Depends(get_db)):
     if user.is_email_verified:
         return {"message": "Email already verified. Please log in."}
 
-    token = create_email_verification_token(email=email)
-    send_verification_email(email, token)
+    try:
+        token = issue_email_verification_token(db, user)
+        send_verification_email(email, token)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     return {"message": "If that email exists, a verification link was sent."}
 
@@ -170,7 +187,7 @@ def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
     if not user.is_email_verified:
         raise HTTPException(status_code=403, detail="Email not verified")
 
-    access_token = create_access_token(subject=email)
+    access_token = create_access_token(subject=email, token_version=user.token_version)
 
     # Issue refresh token + set HttpOnly cookie
     refresh_token = issue_refresh_token(db, user_id=user.id)
@@ -210,7 +227,7 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
     new_refresh_token = issue_refresh_token(db, user_id=user.id)
     set_refresh_cookie(response, new_refresh_token)
 
-    access_token = create_access_token(subject=user.email)
+    access_token = create_access_token(subject=user.email, token_version=user.token_version)
     return {
         "access_token": access_token,
         "token_type": "bearer",

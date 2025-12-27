@@ -4,16 +4,122 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
+
     button,
     a,
     [role="button"] {
         cursor: pointer;
     }
+
     /* Theme: Tailwind dark mode uses the `dark` class on <html>. */
     html {
         color-scheme: light;
     }
+
     html.dark {
         color-scheme: dark;
     }
+
+    :root {
+        --surface-page: #050816;
+        --surface-card: #0f172a;
+        --surface-card-muted: #0b1220;
+        --surface-soft: #020617;
+        --surface-border: #1f2937;
+        --text-primary: #e2e8f0;
+        --text-muted: #94a3b8;
+        --text-subtle: #7c8ca7;
+        --chart-grid: #334155;
+        --chart-tooltip-bg: #0b1220;
+        --chart-tooltip-border: #1f2937;
+        --chart-accent: #38bdf8;
+    }
+
+    html[data-theme="light"] {
+        --surface-page: #f5f6fb;
+        --surface-card: #ffffff;
+        --surface-card-muted: #eef2ff;
+        --surface-soft: #f8fafc;
+        --surface-border: #d8e0ef;
+        --text-primary: #0f172a;
+        --text-muted: #475569;
+        --text-subtle: #64748b;
+        --chart-grid: #cbd5f5;
+        --chart-tooltip-bg: #ffffff;
+        --chart-tooltip-border: #d8e0ef;
+        --chart-accent: #0ea5e9;
+    }
+
+    body {
+        background: var(--surface-page);
+        color: var(--text-primary);
+    }
+}
+
+html[data-theme="light"] .bg-slate-900\/50 {
+    background-color: var(--surface-card) !important;
+    border-color: var(--surface-border) !important;
+}
+
+html[data-theme="light"] .bg-slate-900\/40 {
+    background-color: var(--surface-soft) !important;
+    border-color: var(--surface-border) !important;
+}
+
+html[data-theme="light"] .bg-slate-900\/30,
+html[data-theme="light"] .bg-slate-900\/60,
+html[data-theme="light"] .bg-slate-900\/70,
+html[data-theme="light"] .bg-slate-900\/80,
+html[data-theme="light"] .bg-slate-950\/30,
+html[data-theme="light"] .bg-slate-950\/40,
+html[data-theme="light"] .bg-slate-950\/50,
+html[data-theme="light"] .bg-slate-950\/60 {
+    background-color: var(--surface-card) !important;
+    border-color: var(--surface-border) !important;
+    color: var(--text-primary) !important;
+}
+
+html[data-theme="light"] .bg-slate-800\/50,
+html[data-theme="light"] .bg-slate-800\/60,
+html[data-theme="light"] .bg-slate-800\/70,
+html[data-theme="light"] .bg-slate-800\/80,
+html[data-theme="light"] .bg-slate-800 {
+    background-color: var(--surface-card-muted) !important;
+    border-color: var(--surface-border) !important;
+    color: var(--text-primary) !important;
+}
+
+html[data-theme="light"] .bg-slate-950\/30 {
+    background-color: var(--surface-card-muted) !important;
+    border-color: var(--surface-border) !important;
+}
+
+html[data-theme="light"] .border-slate-800 {
+    border-color: var(--surface-border) !important;
+}
+
+html[data-theme="light"] .border-slate-700 {
+    border-color: var(--surface-border) !important;
+}
+
+html[data-theme="light"] .border-slate-900\/40,
+html[data-theme="light"] .border-slate-900\/30 {
+    border-color: var(--surface-border) !important;
+}
+
+html[data-theme="light"] .text-slate-100,
+html[data-theme="light"] .text-slate-200 {
+    color: var(--text-primary) !important;
+}
+
+html[data-theme="light"] .text-slate-300 {
+    color: #1e293b !important;
+}
+
+html[data-theme="light"] .text-slate-400 {
+    color: var(--text-muted) !important;
+}
+
+html[data-theme="light"] .text-slate-500 {
+    color: var(--text-subtle) !important;
 }

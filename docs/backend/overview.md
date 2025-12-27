@@ -20,6 +20,13 @@ This document describes the backend structure and conventions at a high level.
 - Two discrete URLs exist in config: `database_url` (app) and `migrations_database_url` (Alembic). This protects production data by enforcing least privilege and keeps migrations auditable.
 - Legacy `DB_USER` / `DB_PASSWORD` configuration has been removed; always supply both credential sets explicitly.
 
+### Hosting & deployment
+
+- Production backend runs on **AWS App Runner** behind `https://api.jobapptracker.dev`.
+- Environment variables (JWT secret, database credentials, email/GuardDuty toggles, etc.) are sourced from **AWS Secrets Manager** and injected into the App Runner service—no secrets live in the repo.
+- Container images are built locally or via CI and pushed to Amazon ECR. Always use `docker buildx build --platform linux/amd64` so the artifact matches App Runner’s runtime; images that run on Apple Silicon without the flag will fail to boot in App Runner.
+- After pushing `ACCOUNT_ID.dkr.ecr.<region>.amazonaws.com/<repo_name>:<tag>`, update the App Runner service to pull the new tag; App Runner handles rolling deployment and health checks.
+
 ### Password policy
 
 - Configurable via `PASSWORD_MIN_LENGTH` (default 14) and `PASSWORD_MAX_AGE_DAYS` (default 90). Strength checks apply whenever passwords are set or changed; login never rejects existing weak passwords.

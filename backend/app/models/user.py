@@ -24,6 +24,7 @@ class User(Base):
     data_retention_days = Column(Integer, nullable=False, server_default="0")
     password_hash = Column(String(255), nullable=False)
     password_changed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    token_version = Column(Integer, nullable=False, server_default="0", default=0)
 
     is_active = Column(Boolean, nullable=False, server_default="true")
     is_email_verified = Column(Boolean, nullable=False, server_default="false")
@@ -41,6 +42,12 @@ class User(Base):
     # ✅ user → refresh tokens
     refresh_tokens = relationship(
         "RefreshToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    email_verification_tokens = relationship(
+        "EmailVerificationToken",
         back_populates="user",
         cascade="all, delete-orphan",
     )

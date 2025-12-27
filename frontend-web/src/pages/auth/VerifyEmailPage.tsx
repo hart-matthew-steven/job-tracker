@@ -34,10 +34,17 @@ export default function VerifyEmailPage() {
       setError("");
       setMessage("");
 
+      const normalizedEmail = email.trim().toLowerCase();
+
       if (!token) {
-        const msg = "Missing verification token. Please use the link from your email.";
-        setError(msg);
-        toast.error(msg, "Verify email");
+        if (normalizedEmail) {
+          const msg = `We emailed a verification link to ${normalizedEmail}. Check your inbox or resend it below.`;
+          setMessage(msg);
+        } else {
+          const msg = "Missing verification token. Please use the link from your email.";
+          setError(msg);
+          toast.error(msg, "Verify email");
+        }
         return;
       }
 
@@ -67,7 +74,7 @@ export default function VerifyEmailPage() {
     return () => {
       cancelled = true;
     };
-  }, [token, nav, next, toast]);
+  }, [token, email, nav, next, toast]);
 
   async function onResend() {
     setError("");

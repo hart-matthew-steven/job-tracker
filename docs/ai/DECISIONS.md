@@ -100,6 +100,24 @@ Record decisions that affect structure or long-term direction.
 
 ---
 
+## 2025-12-24 — Production hosting via AWS App Runner + Secrets Manager
+- Decision: Host the backend on AWS App Runner behind `api.jobapptracker.dev`, pull container images from ECR, and source sensitive configuration from AWS Secrets Manager (env injection) instead of local `.env` files.
+- Rationale: App Runner provides managed HTTPS, health checks, autoscaling, and blue/green deploys without maintaining ECS clusters. Secrets Manager keeps JWT secrets, DB credentials, and provider keys centralized and auditable.
+- Consequences:
+  - Docker builds intended for production must use `docker buildx build --platform linux/amd64` before pushing to ECR; ARM-native images that work on Apple Silicon fail in App Runner otherwise.
+  - Deployment workflow: `docker login` to ECR, build & push image, update App Runner service to the new tag (future CI/CD will automate this).
+  - Runtime environment variables are no longer read from repo-local `.env` in production; they must be added/updated in Secrets Manager.
+
+## 2025-12-25 — Email verification tokens are single-use + token-versioned sessions
+- Decision: Persist hashed verification token IDs (`email_verification_tokens`) so email links are single-use, and embed a `token_version` claim into access tokens so user sessions can be revoked by bumping the column (e.g., on password change or admin deletion).
+- Rationale: Prevents recycled verification links from working after resends or account recreation, and ensures users are logged out promptly when credentials change.
+- Consequences:
+  - `/auth/verify` now errors after a link is used once; resending a verification email invalidates any prior link.
+  - Access tokens created before a `token_version` bump are rejected (`401`), forcing re-auth even if a refresh token remains.
+  - Change-password flow increments `token_version` in addition to revoking refresh tokens.
+
+---
+
 ## 2025-12-18 — User settings persisted on users table
 - Decision: Persist user preference `auto_refresh_seconds` on the `users` table and expose via `/users/me/settings`.
 - Rationale: Keeps a single-user settings surface area small and avoids separate settings tables prematurely.

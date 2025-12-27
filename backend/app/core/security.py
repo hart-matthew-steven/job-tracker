@@ -38,7 +38,7 @@ def _require_jwt_secret() -> None:
         raise RuntimeError("JWT_SECRET must be set (auth is required).")
 
 
-def create_access_token(subject: str) -> str:
+def create_access_token(subject: str, token_version: int = 0) -> str:
     """
     Access token used for API auth: Authorization: Bearer <token>
     subject = user's email in our flow
@@ -53,12 +53,13 @@ def create_access_token(subject: str) -> str:
         "purpose": "access",
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
+        "ver": int(token_version or 0),
     }
 
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
-def create_email_verification_token(email: str) -> str:
+def create_email_verification_token(email: str) -> tuple[str, str, datetime]:
     """
     Token used for /auth/verify?token=...
     """
@@ -67,14 +68,17 @@ def create_email_verification_token(email: str) -> str:
     now = _now_utc()
     exp = now + timedelta(hours=settings.EMAIL_VERIFY_TOKEN_EXPIRE_HOURS)
 
+    token_id = secrets.token_urlsafe(16)
+
     payload = {
         "sub": email,
         "purpose": "email_verification",
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
+        "jti": token_id,
     }
 
-    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM), token_id, exp
 
 
 def decode_token(token: str) -> dict[str, Any]:

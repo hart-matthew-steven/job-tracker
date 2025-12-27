@@ -149,10 +149,49 @@ Backend-specific documentation (if present) lives under:
   5. **Verify a user when email delivery is disabled locally:**
 
      ```bash
-     docker compose exec backend python -c "from app.core.security import create_email_verification_token; from app.core.config import settings; email='<EMAIL>'; token=create_email_verification_token(email); print(f'{settings.FRONTEND_BASE_URL}/verify?token={token}&email={email}')"
+     docker compose exec backend python - <<'PY'
+from app.core.database import SessionLocal
+from app.models.user import User
+from app.services.email_verification import issue_email_verification_token
+from app.core.config import settings
+
+email = "<EMAIL>".strip().lower()
+with SessionLocal() as session:
+    user = session.query(User).filter(User.email == email).first()
+    if not user:
+        raise SystemExit(f"No user found for {email}")
+    token = issue_email_verification_token(session, user)
+    session.commit()
+    print(f"{settings.FRONTEND_BASE_URL}/verify?token={token}&email={email}")
+PY
      ```
 
      Copy the printed URL into your browser to mark the account verified. Afterwards you can log in normally.
+
+### Production deployment (AWS App Runner)
+
+- The backend is deployed to **AWS App Runner** behind `https://api.jobapptracker.dev`.
+- Runtime secrets (JWT secret, DB credentials, email/API keys, etc.) are provided via **AWS Secrets Manager** and injected into the App Runner service as environment variables, so they never live in the repo.
+- Images are stored in Amazon ECR. Build and push from a trusted workstation/CI pipeline with `docker buildx` so the platform matches App Runner’s `linux/amd64` runtime (this flag is required even on Apple Silicon laptops; without it App Runner fails to start the container even though it runs locally).
+
+```bash
+export ACCOUNT_ID=<account_id>
+export REGION=<region>
+export REPO=<repo_name>
+export TAG=<git-sha-or-version>
+export IMAGE_URI=$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO
+
+aws ecr get-login-password --region "$REGION" \
+  | docker login --username AWS --password-stdin "$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
+
+docker buildx build \
+  --platform linux/amd64 \
+  -t "$IMAGE_URI:$TAG" \
+  --push \
+  .
+```
+
+After the image is pushed, point the App Runner service at the new ECR tag (or update the service via IaC/console). App Runner pulls the image, injects environment variables from Secrets Manager, and exposes the service at the subdomain above.
 
 ---
 
