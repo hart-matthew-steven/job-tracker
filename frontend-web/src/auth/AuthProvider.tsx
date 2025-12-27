@@ -1,6 +1,6 @@
 // src/auth/AuthProvider.tsx
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { getAccessToken, setAccessToken, logoutUser, subscribeToUnauthorizedLogout } from "../api";
 
 export type AuthContextValue = {
@@ -38,13 +38,19 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     const [token, setToken] = useState<string | null>(() => getAccessToken());
     const [isReady, setIsReady] = useState(false);
 
+    const markJustLoggedOut = useCallback(() => {
+        try {
+            sessionStorage.setItem("jt.justLoggedOut", "1");
+        } catch {
+            // ignore
+        }
+    }, []);
+
     // Hydrate token from localStorage on app start + keep tab state in sync
     useEffect(() => {
         const sync = () => setToken(getAccessToken());
         sync();
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setIsReady(true);
-
+        const readyTimer = window.setTimeout(() => setIsReady(true), 0);
         window.addEventListener("storage", sync);
         const unsubscribe = subscribeToUnauthorizedLogout(() => {
             markJustLoggedOut();
@@ -54,20 +60,13 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         return () => {
             window.removeEventListener("storage", sync);
             unsubscribe();
+            clearTimeout(readyTimer);
         };
-    }, []);
+    }, [markJustLoggedOut]);
 
     function setSession(newToken: string | null) {
         setAccessToken(newToken);
         setToken(newToken);
-    }
-
-    function markJustLoggedOut() {
-        try {
-            sessionStorage.setItem("jt.justLoggedOut", "1");
-        } catch {
-            // ignore
-        }
     }
 
     // Phase 2: server logout (revokes refresh token cookie + clears local token in api.js)

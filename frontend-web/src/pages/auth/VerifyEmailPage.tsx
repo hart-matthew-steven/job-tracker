@@ -74,7 +74,7 @@ export default function VerifyEmailPage() {
     return () => {
       cancelled = true;
     };
-  }, [token, nav, next, toast]);
+  }, [token, email, nav, next, toast]);
 
   async function onResend() {
     setError("");

@@ -57,13 +57,11 @@ vi.mock("../components/jobs/JobCard", () => ({
 }));
 
 async function renderPage() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).scrollTo = vi.fn();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (globalThis as any).requestAnimationFrame = (cb: (t: number) => void) => {
+  window.scrollTo = vi.fn() as typeof window.scrollTo;
+  globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
     cb(0);
     return 0;
-  };
+  }) as typeof globalThis.requestAnimationFrame;
 
   const mod = (await import("./JobsPage")) as unknown as { default: React.ComponentType };
   const JobsPage = mod.default;
