@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.security import create_email_verification_token
+from app.services.email_verification import issue_email_verification_token
 
 
 def test_auth_register_verify_login_refresh_logout(client, db_session, monkeypatch):
@@ -23,7 +23,8 @@ def test_auth_register_verify_login_refresh_logout(client, db_session, monkeypat
     assert u.is_email_verified is False
 
     # Verify
-    token = create_email_verification_token(email=email)
+    token = issue_email_verification_token(db_session, u)
+    db_session.commit()
     res2 = client.get("/auth/verify", params={"token": token})
     assert res2.status_code == 200
 
@@ -50,6 +51,55 @@ def test_auth_register_verify_login_refresh_logout(client, db_session, monkeypat
     res5 = client.post("/auth/logout")
     assert res5.status_code == 200
     assert res5.json()["message"] == "Logged out"
+
+
+def test_email_verification_token_is_single_use(client, db_session, monkeypatch):
+    from app.routes import auth as auth_routes
+    from app.models.user import User
+    from app.services.email_verification import issue_email_verification_token
+
+    monkeypatch.setattr(auth_routes, "send_email", lambda *args, **kwargs: "msg_test_123")
+
+    email = "singleuse@example.com"
+    password = "Password_12345"
+
+    res = client.post("/auth/register", json={"email": email, "password": password, "name": "Single Use"})
+    assert res.status_code == 200
+
+    user = db_session.query(User).filter(User.email == email).first()
+    token = issue_email_verification_token(db_session, user)
+    db_session.commit()
+
+    first = client.get("/auth/verify", params={"token": token})
+    assert first.status_code == 200
+
+    second = client.get("/auth/verify", params={"token": token})
+    assert second.status_code == 400
+
+
+def test_email_verification_resend_invalidates_old_token(client, db_session, monkeypatch):
+    from app.routes import auth as auth_routes
+    from app.models.user import User
+    from app.services.email_verification import issue_email_verification_token
+
+    monkeypatch.setattr(auth_routes, "send_email", lambda *args, **kwargs: "msg_test_123")
+
+    email = "resend@example.com"
+    password = "Password_12345"
+
+    res = client.post("/auth/register", json={"email": email, "password": password, "name": "Resend User"})
+    assert res.status_code == 200
+
+    user = db_session.query(User).filter(User.email == email).first()
+    first_token = issue_email_verification_token(db_session, user)
+    second_token = issue_email_verification_token(db_session, user)
+    db_session.commit()
+
+    old_res = client.get("/auth/verify", params={"token": first_token})
+    assert old_res.status_code == 400
+
+    res2 = client.get("/auth/verify", params={"token": second_token})
+    assert res2.status_code == 200
 
 
 def test_auth_refresh_missing_cookie_is_401(client):

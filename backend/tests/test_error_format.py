@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from app.core.security import create_email_verification_token
+from app.services.email_verification import issue_email_verification_token
+from app.models.user import User
 
 
 def _create_job(client):
@@ -55,7 +56,7 @@ def test_error_shape_422_request_validation_error(client):
     assert isinstance(body["details"].get("errors"), list)
 
 
-def test_error_shape_403_login_unverified_email(client, monkeypatch):
+def test_error_shape_403_login_unverified_email(client, db_session, monkeypatch):
     # Avoid any real email delivery.
     from app.routes import auth as auth_routes
 
@@ -72,7 +73,9 @@ def test_error_shape_403_login_unverified_email(client, monkeypatch):
     _assert_error_shape(res2, error="FORBIDDEN")
 
     # Verify so this test doesn't interfere with later auth tests that might re-use email.
-    token = create_email_verification_token(email=email)
+    user = db_session.query(User).filter(User.email == email).first()
+    token = issue_email_verification_token(db_session, user)
+    db_session.commit()
     res3 = client.get("/auth/verify", params={"token": token})
     assert res3.status_code == 200
 

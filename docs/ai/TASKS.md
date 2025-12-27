@@ -12,15 +12,20 @@
   - Backend env var example generated at `backend/.env.example`
 
 ## Next
-- (none)
+- Backend deployment automation:
+  - Build CI/CD pipeline to build/push the backend image to ECR (with `--platform linux/amd64`) and trigger App Runner updates on merge to `main`.
+  - Enable GitHub branch protection so CI must pass before deploy.
+- Frontend deployment plan:
+  - Decide on AWS hosting target (e.g., S3/CloudFront, Amplify, or App Runner) and design an equivalent pipeline for automatic deploys once chosen.
 
 ## Later
-- Production deployment:
-  - Host backend behind stable AWS ingress (ALB/API Gateway)
-  - Replace ngrok with production endpoint for Lambda → backend callbacks
-  - Enable branch protection in GitHub (require CI checks to pass)
-  - Configure stable domain for frontend
-  - Harden secrets management (AWS Secrets Manager)
+- Feature enhancements:
+  - AI assistant to compare resumes vs job descriptions, suggest tailored edits, generate cover/thank-you letters, and upload the resulting files to the relevant job automatically.
+  - Multi-factor authentication + passkey support, with an eventual iOS app that can leverage Face ID for login.
+  - Offer tracking revamp once higher-priority workflows ship.
+- Deployment polish:
+  - Frontend hosting automation (once platform is selected).
+  - Additional AWS hardening (observability, alerting, secret rotation schedule, staged environments).
 
 ## Completed
 - **Phase 8: Malware scanning pipeline** (GuardDuty Malware Protection for S3):

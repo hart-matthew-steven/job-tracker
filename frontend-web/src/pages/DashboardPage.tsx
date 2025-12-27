@@ -40,6 +40,12 @@ function getAppliedDate(job: Job) {
 
 // Palette (keep your current look)
 const PIE_COLORS = ["#38bdf8", "#0ea5e9", "#94a3b8", "#64748b", "#475569", "#334155"];
+const GRID_COLOR = "var(--chart-grid)";
+const TOOLTIP_BG = "var(--chart-tooltip-bg)";
+const TOOLTIP_BORDER = "var(--chart-tooltip-border)";
+const TOOLTIP_TEXT = "var(--text-primary)";
+const TOOLTIP_LABEL = "var(--text-muted)";
+const BAR_COLOR = "var(--chart-accent)";
 
 export default function DashboardPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -255,11 +261,14 @@ export default function DashboardPage() {
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%"> 
                 <BarChart data={weeklyApps}>
-                  <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
-                  <XAxis dataKey="week" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <Tooltip contentStyle={{ background: "#0b1220", border: "1px solid #1f2937", color: "#e2e8f0" }} labelStyle={{ color: "#94a3b8" }} />
-                  <Bar dataKey="count" fill="#38bdf8" />
+                  <CartesianGrid stroke={GRID_COLOR} strokeDasharray="3 3" />
+                  <XAxis dataKey="week" tick={{ fill: TOOLTIP_LABEL, fontSize: 12 }} />
+                  <YAxis allowDecimals={false} tick={{ fill: TOOLTIP_LABEL, fontSize: 12 }} />
+                  <Tooltip
+                    contentStyle={{ background: TOOLTIP_BG, border: `1px solid ${TOOLTIP_BORDER}`, color: TOOLTIP_TEXT }}
+                    labelStyle={{ color: TOOLTIP_LABEL }}
+                  />
+                  <Bar dataKey="count" fill={BAR_COLOR} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

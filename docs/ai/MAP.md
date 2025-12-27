@@ -32,6 +32,7 @@ Update it whenever key entry points or folder structure changes.
 - Schemas: `backend/app/schemas/` (expected)
 - Backend tests: `backend/tests/` (pytest)
 - Backend env var reference: `backend/.env.example` (generated, names only)
+- Deployment: README “Production deployment (AWS App Runner)” section documents the ECR/App Runner flow (buildx `linux/amd64`, Secrets Manager env injection, `api.jobapptracker.dev` endpoint).
 
 ## Architecture Docs
 - Overview: `docs/architecture/overview.md`

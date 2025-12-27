@@ -22,7 +22,7 @@ services:
     depends_on:
       - db
     environment:
-      CORS_ORIGINS: "http://localhost:5173,http://matts-macbook.local:5173"
+      CORS_ORIGINS: "http://localhost:5173"
       PORT: 8000
       DB_HOST: db
       DB_PORT: 5432

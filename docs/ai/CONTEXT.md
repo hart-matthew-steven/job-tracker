@@ -33,6 +33,7 @@ Primary goals:
 - Strong password policy enforced when setting passwords via `app/core/password_policy.py`
 - `users.password_changed_at` tracks rotation; login responses include `must_change_password`
 - Database access split between least-privilege runtime (`DB_APP_USER`) and migrations (`DB_MIGRATOR_USER`) credentials, each with its own connection URL.
+- Production hosting: AWS App Runner pulling images from ECR, fronted by `https://api.jobapptracker.dev`; runtime secrets come from AWS Secrets Manager env injects.
 
 ## AWS / External Services (current)
 - **Email**: provider-selectable for verification emails:
@@ -41,11 +42,14 @@ Primary goals:
   - `gmail` (SMTP)
   - legacy alias: `smtp` → `gmail`
 - **S3**: job document upload flow via presigned URLs (see `/jobs/{job_id}/documents/*`)
-- **GuardDuty Malware Protection for S3**: AWS-managed malware scanning for uploaded documents. EventBridge triggers a Lambda forwarder, which updates the backend document `scan_status`. The GuardDuty verdict is sourced from the S3 object tag `GuardDutyMalwareScanStatus` (Lambda falls back to S3 `GetObjectTagging` if the event payload does not include tags).
+- **GuardDuty Malware Protection for S3**: AWS-managed malware scanning for uploaded documents. EventBridge triggers a Lambda forwarder, which updates the backend document `scan_status`. The GuardDuty verdict is sourced from the S3 object tag `GuardDutyMalwareScanStatus` (Lambda falls back to S3 `GetObjectTagging` if the event payload does not include tags). GuardDuty callbacks are feature-gated via `GUARD_DUTY_ENABLED` so local Docker runs can noop safely.
+- **App Runner**: hosts the backend container, pulls from ECR with `linux/amd64` images, injects env vars from Secrets Manager, handles health checks routed through `/health`.
 
 ## Intended Future Direction (high-level)
 - iOS app (separate client, likely `frontend-ios/` when introduced)
-- AWS hardening and production infrastructure (explicitly staged)
+- AWS hardening and production infrastructure (explicitly staged); next step is CI/CD to build & deploy backend (App Runner) and later frontend automatically on merge to `main`.
+- AI assistant features (resume/job-description tailoring, cover/thank-you letters with automatic S3 upload to a job record).
+- Multi-factor authentication, passkey login, eventual biometric (Face ID) support on iOS.
 - Continued refactors: improve maintainability, reduce duplication, keep tests comprehensive
 
 ## Key Flows

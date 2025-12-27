@@ -6,7 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_token_subject
+from app.core.security import verify_token_purpose
 from app.core.database import get_db
 from app.models.user import User
 
@@ -37,14 +37,24 @@ def get_current_user(
         raise _unauthorized("Missing Authorization header")
 
     try:
-        email = get_token_subject(creds.credentials)
-    except (JWTError, ValueError):
+        payload = verify_token_purpose(creds.credentials, expected_purpose="access")
+    except ValueError:
         raise _unauthorized("Invalid or expired token")
+    except JWTError:
+        raise _unauthorized("Invalid or expired token")
+
+    email = str(payload.get("sub") or "").strip().lower()
+    if not email:
+        raise _unauthorized("Invalid or expired token")
+
+    token_version = int(payload.get("ver") or 0)
 
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise _unauthorized("User not found")
     if not getattr(user, "is_active", True):
         raise _unauthorized("User is inactive")
+    if int(getattr(user, "token_version", 0) or 0) != token_version:
+        raise _unauthorized("Invalid or expired token")
 
     return user

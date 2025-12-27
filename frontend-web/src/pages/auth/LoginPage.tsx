@@ -124,8 +124,11 @@ export default function LoginPage() {
       </div>
 
       <div className="text-xs text-slate-500">
-        If you already registered but haven’t verified your email yet, open the
-        verification link printed in your backend console (dev).
+        Already registered but not verified? Check your inbox for the verification link or{" "}
+        <NavLink to={registerLink} className="text-blue-700 hover:text-blue-800 font-semibold dark:text-blue-300 dark:hover:text-blue-200">
+          resend it
+        </NavLink>{" "}
+        from the register screen.
       </div>
     </div>
   );

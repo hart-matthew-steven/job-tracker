@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     host: true, // 👈 exposes on LAN
     allowedHosts: [
-      "matts-macbook.local",
+      "localhost",
     ],
     port: 5173,
   },
