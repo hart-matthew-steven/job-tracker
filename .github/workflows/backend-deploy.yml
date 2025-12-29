@@ -1,0 +1,90 @@
+name: Deploy Backend (App Runner)
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "backend/**"
+      - "scripts/deploy_apprunner.py"
+      - ".github/workflows/backend-deploy.yml"
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: backend-prod
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build + Push to ECR + Deploy App Runner
+    runs-on: ubuntu-latest
+    environment: prod
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deploy deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3
+
+      - name: Resolve AWS Account ID
+        id: acct
+        run: |
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          echo "account_id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: tag
+        run: |
+          TS="$(date -u +%Y%m%d%H%M%S)"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "tag=${TS}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        id: image
+        working-directory: backend
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          ACCOUNT_ID: ${{ steps.acct.outputs.account_id }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          IMAGE_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          echo "Building: $IMAGE_URI"
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy via boto3 (wait + health + rollback)
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          APPRUNNER_SERVICE_ARN: ${{ secrets.APPRUNNER_SERVICE_ARN }}
+          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+          HEALTH_URL: ${{ secrets.BACKEND_HEALTH_URL }}
+        run: |
+          python scripts/deploy_apprunner.py \
+            --region "$AWS_REGION" \
+            --service-arn "$APPRUNNER_SERVICE_ARN" \
+            --image-uri "$IMAGE_URI" \
+            --health-url "$HEALTH_URL" \
+            --timeout-seconds 900
