@@ -54,26 +54,37 @@ jobs:
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
         run: npm run build
 
-      # Verify output exists and also prove the backend URL made it into the bundle
+      # Verify output exists and sanity-check the bundle picked up the API URL
       - name: Verify build output
         shell: bash
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
         run: |
           set -euo pipefail
 
           test -d "frontend-web/dist" || (echo "Expected frontend-web/dist. If your output is build/, update workflow." && exit 1)
           ls -la frontend-web/dist
 
-          echo "Checking bundle contains VITE_API_BASE_URL value..."
-          if [ -z "${{ secrets.VITE_API_BASE_URL }}" ]; then
+          if [ -z "${VITE_API_BASE_URL:-}" ]; then
             echo "VITE_API_BASE_URL secret is empty!"
             exit 1
           fi
 
-          # Grep for the URL in built assets. (Vite replaces the variable with the value.)
-          # This is a quick sanity check so we don't deploy a bundle pointing at localhost.
-          grep -R "${{ secrets.VITE_API_BASE_URL }}" -n frontend-web/dist >/dev/null \
+          echo "Sanity check: ensuring bundle contains API base URL (no output printed)..."
+          grep -R -F "${VITE_API_BASE_URL}" -n frontend-web/dist >/dev/null \
             && echo "✅ Found API base URL in dist bundle" \
             || (echo "❌ Did NOT find API base URL in dist bundle. Build likely used a different value." && exit 1)
+
+      # ---- Release ID for versioned deployments ----
+      - name: Set release id
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          TS="$(date -u +%Y%m%d%H%M%S)"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "release_id=${TS}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "Release ID: ${TS}-${SHORT_SHA}"
 
       # ---- Deploy via boto3 ----
       - name: Setup Python
@@ -86,16 +97,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install boto3
 
-      - name: Deploy frontend (S3 sync + CloudFront invalidation)
+      - name: Deploy frontend (versioned release + promote + CloudFront invalidation)
         env:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           FRONTEND_S3_BUCKET: ${{ secrets.FRONTEND_S3_BUCKET }}
           CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
         run: |
           python scripts/deploy_frontend.py \
             --region "$AWS_REGION" \
             --bucket "$FRONTEND_S3_BUCKET" \
             --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
             --build-dir "frontend-web/dist" \
+            --release-id "$RELEASE_ID" \
+            --frontend-url "$FRONTEND_URL" \
             --invalidate-paths "/*" \
             --wait-invalidation
