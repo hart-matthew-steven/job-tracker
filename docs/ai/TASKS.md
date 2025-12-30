@@ -12,11 +12,11 @@
   - Backend env var example generated at `backend/.env.example`
 
 ## Next
-- Backend deployment automation:
-  - Build CI/CD pipeline to build/push the backend image to ECR (with `--platform linux/amd64`) and trigger App Runner updates on merge to `main`.
-  - Enable GitHub branch protection so CI must pass before deploy.
-- Frontend deployment plan:
-  - Decide on AWS hosting target (e.g., S3/CloudFront, Amplify, or App Runner) and design an equivalent pipeline for automatic deploys once chosen.
+- Deployment safeguards:
+  - Add branch protection / required checks so CI must pass before backend/frontend deploy workflows run automatically.
+  - Add monitoring/alerting around the new pipelines (health check failures, rollback notifications).
+- Observability:
+  - Decide on log aggregation + metrics/alerts for App Runner and CloudFront/S3 so production incidents are easier to triage.
 
 ## Later
 - Feature enhancements:
@@ -24,10 +24,12 @@
   - Multi-factor authentication + passkey support, with an eventual iOS app that can leverage Face ID for login.
   - Offer tracking revamp once higher-priority workflows ship.
 - Deployment polish:
-  - Frontend hosting automation (once platform is selected).
   - Additional AWS hardening (observability, alerting, secret rotation schedule, staged environments).
 
 ## Completed
+- Backend & frontend deployment automation:
+  - `backend-deploy.yml` builds/pushes the API image, assumes AWS role via OIDC, and calls `scripts/deploy_apprunner.py` for zero-downtime deploys with rollback + health checks.
+  - `frontend-deploy.yml` builds the Vite SPA, versions releases in S3 via `scripts/deploy_frontend.py`, promotes them, invalidates CloudFront, and records release metadata for rollbacks.
 - **Phase 8: Malware scanning pipeline** (GuardDuty Malware Protection for S3):
   - Migrated from ClamAV-based scanning to AWS GuardDuty for production reliability
   - Removed: ClamAV Lambda code, SQS triggers, EFS definitions, quarantine logic
