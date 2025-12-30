@@ -1,0 +1,101 @@
+name: Deploy Frontend (S3 + CloudFront)
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "frontend-web/**"
+      - "scripts/deploy_frontend.py"
+      - ".github/workflows/frontend-deploy.yml"
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: frontend-prod
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build + Upload to S3 + Invalidate CloudFront
+    runs-on: ubuntu-latest
+    environment: prod
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---- OIDC into AWS (frontend-only role) ----
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_FRONTEND }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # ---- Build frontend ----
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend-web/package-lock.json
+
+      - name: Install deps
+        working-directory: frontend-web
+        run: npm ci
+
+      # IMPORTANT: inject VITE_* at build time (no .env.production in repo)
+      - name: Build
+        working-directory: frontend-web
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+        run: npm run build
+
+      # Verify output exists and also prove the backend URL made it into the bundle
+      - name: Verify build output
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -d "frontend-web/dist" || (echo "Expected frontend-web/dist. If your output is build/, update workflow." && exit 1)
+          ls -la frontend-web/dist
+
+          echo "Checking bundle contains VITE_API_BASE_URL value..."
+          if [ -z "${{ secrets.VITE_API_BASE_URL }}" ]; then
+            echo "VITE_API_BASE_URL secret is empty!"
+            exit 1
+          fi
+
+          # Grep for the URL in built assets. (Vite replaces the variable with the value.)
+          # This is a quick sanity check so we don't deploy a bundle pointing at localhost.
+          grep -R "${{ secrets.VITE_API_BASE_URL }}" -n frontend-web/dist >/dev/null \
+            && echo "✅ Found API base URL in dist bundle" \
+            || (echo "❌ Did NOT find API base URL in dist bundle. Build likely used a different value." && exit 1)
+
+      # ---- Deploy via boto3 ----
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deploy deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3
+
+      - name: Deploy frontend (S3 sync + CloudFront invalidation)
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          FRONTEND_S3_BUCKET: ${{ secrets.FRONTEND_S3_BUCKET }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          python scripts/deploy_frontend.py \
+            --region "$AWS_REGION" \
+            --bucket "$FRONTEND_S3_BUCKET" \
+            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+            --build-dir "frontend-web/dist" \
+            --invalidate-paths "/*" \
+            --wait-invalidation
