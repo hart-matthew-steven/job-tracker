@@ -28,46 +28,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Debug role arn (temporary)
-        run: |
-          echo "AWS_ROLE_ARN is set? $([ -n "${{ secrets.AWS_ROLE_ARN }}" ] && echo yes || echo no)"
-          echo "AWS_ROLE_ARN length: $(echo -n "${{ secrets.AWS_ROLE_ARN }}" | wc -c)"
-          echo "AWS_ROLE_ARN sha256: $(echo -n "${{ secrets.AWS_ROLE_ARN }}" | shasum -a 256 | awk '{print $1}')"
-          
-      # -----------------------------
-      # TEMP: Debug GitHub OIDC claims
-      # -----------------------------
-      - name: Debug OIDC token claims (temporary)
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "ACTIONS_ID_TOKEN_REQUEST_URL is set? $([ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && echo yes || echo no)"
-          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN is set? $([ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] && echo yes || echo no)"
-
-          OIDC_URL="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com"
-          JWT="$(curl -sS -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${OIDC_URL}" | python -c 'import sys,json; print(json.load(sys.stdin).get("value",""))')"
-
-          if [ -z "$JWT" ]; then
-            echo "Failed to retrieve OIDC JWT"
-            exit 0
-          fi
-
-          python - <<'PY' "$JWT"
-          import sys, json, base64
-
-          jwt = sys.argv[1]
-          parts = jwt.split(".")
-          if len(parts) != 3:
-              print("Unexpected JWT format")
-              sys.exit(0)
-
-          payload_b64 = parts[1] + "==="
-          payload = json.loads(base64.urlsafe_b64decode(payload_b64).decode("utf-8"))
-          print("OIDC JWT claims:")
-          print(json.dumps(payload, indent=2, sort_keys=True))
-          PY
-
       # -----------------------------
       # Assume AWS role via OIDC
       # -----------------------------
