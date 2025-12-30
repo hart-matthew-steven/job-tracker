@@ -193,6 +193,20 @@ docker buildx build \
 
 After the image is pushed, point the App Runner service at the new ECR tag (or update the service via IaC/console). App Runner pulls the image, injects environment variables from Secrets Manager, and exposes the service at the subdomain above.
 
+### CI/CD pipelines
+
+Production deploys are now automated through GitHub Actions:
+
+- **Backend** — `.github/workflows/backend-deploy.yml`
+  - Triggers on pushes to `main` that touch `backend/**`, the deploy script, or the workflow.
+  - Uses GitHub OIDC to assume `AWS_ROLE_ARN_BACKEND`, builds the Docker image with `docker build` (linux/amd64), tags/pushes to ECR, then runs `scripts/deploy_apprunner.py` to update the App Runner service, wait for health, and roll back automatically if needed.
+  - Can also be run manually via `workflow_dispatch` for hotfixes.
+- **Frontend** — `.github/workflows/frontend-deploy.yml`
+  - Triggers on pushes to `main` that touch `frontend-web/**`, the deploy script, or the workflow.
+  - Builds the Vite site with injected `VITE_API_BASE_URL`, uploads the `dist/` artifacts to versioned `releases/<id>/` prefixes in S3, promotes the release to the bucket root, updates the `_releases/current.json` pointer, invalidates CloudFront, and optionally health-checks the public site. All rollout/rollback logic lives in `scripts/deploy_frontend.py`.
+
+Both workflows use environment protection rules (`environment: prod`) and a shared concurrency key to avoid overlapping deployments.
+
 ---
 
 ## Documentation

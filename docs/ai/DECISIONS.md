@@ -118,6 +118,18 @@ Record decisions that affect structure or long-term direction.
 
 ---
 
+## 2025-12-30 — GitHub Actions CI/CD for production deploys
+- Decision: Automate production deploys via GitHub Actions workflows:
+  - `backend-deploy.yml` builds/pushes backend images to ECR and updates App Runner using `scripts/deploy_apprunner.py`.
+  - `frontend-deploy.yml` builds the Vite SPA, versions releases in S3, promotes them, invalidates CloudFront, and exposes rollback metadata via `scripts/deploy_frontend.py`.
+- Rationale: Remove manual deploy toil, ensure every merge to `main` publishes consistent artifacts, and capture rollback/health logic in scripts that can be audited.
+- Consequences:
+  - Workflows assume AWS roles via OIDC; repo secrets now point to role ARNs + target resources.
+  - Deploy scripts encapsulate waiting/rollback logic; failures trigger automatic rollback to the last good build.
+  - Future work focuses on branch protection, observability, and staged environments rather than hand-deploy steps.
+
+---
+
 ## 2025-12-18 — User settings persisted on users table
 - Decision: Persist user preference `auto_refresh_seconds` on the `users` table and expose via `/users/me/settings`.
 - Rationale: Keeps a single-user settings surface area small and avoids separate settings tables prematurely.

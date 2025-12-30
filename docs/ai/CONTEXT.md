@@ -33,7 +33,7 @@ Primary goals:
 - Strong password policy enforced when setting passwords via `app/core/password_policy.py`
 - `users.password_changed_at` tracks rotation; login responses include `must_change_password`
 - Database access split between least-privilege runtime (`DB_APP_USER`) and migrations (`DB_MIGRATOR_USER`) credentials, each with its own connection URL.
-- Production hosting: AWS App Runner pulling images from ECR, fronted by `https://api.jobapptracker.dev`; runtime secrets come from AWS Secrets Manager env injects.
+- Production hosting: AWS App Runner pulling images from ECR, fronted by `https://api.jobapptracker.dev`; runtime secrets come from AWS Secrets Manager env injects. GitHub Actions (`backend-deploy.yml`) builds/pushes to ECR and drives App Runner updates via `scripts/deploy_apprunner.py`.
 
 ## AWS / External Services (current)
 - **Email**: provider-selectable for verification emails:
@@ -47,7 +47,7 @@ Primary goals:
 
 ## Intended Future Direction (high-level)
 - iOS app (separate client, likely `frontend-ios/` when introduced)
-- AWS hardening and production infrastructure (explicitly staged); next step is CI/CD to build & deploy backend (App Runner) and later frontend automatically on merge to `main`.
+- Deployment hardening: CI/CD now auto-deploys backend (App Runner) and frontend (S3 + CloudFront) on merge to `main` via `backend-deploy.yml` / `frontend-deploy.yml`; next steps include observability/alerts and staged environments.
 - AI assistant features (resume/job-description tailoring, cover/thank-you letters with automatic S3 upload to a job record).
 - Multi-factor authentication, passkey login, eventual biometric (Face ID) support on iOS.
 - Continued refactors: improve maintainability, reduce duplication, keep tests comprehensive

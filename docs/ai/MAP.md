@@ -44,6 +44,15 @@ Update it whenever key entry points or folder structure changes.
 - Decisions: `docs/ai/DECISIONS.md`
 - Repo map: `docs/ai/MAP.md`
 
+## CI/CD + Scripts
+- GitHub Actions workflows:
+  - Backend deploy: `.github/workflows/backend-deploy.yml`
+  - Frontend deploy: `.github/workflows/frontend-deploy.yml`
+  - CI quality gates: `.github/workflows/ci-backend.yml`, `.github/workflows/ci-frontend.yml`
+- Deployment scripts:
+  - Backend/App Runner: `scripts/deploy_apprunner.py`
+  - Frontend/S3+CloudFront: `scripts/deploy_frontend.py`
+
 ## Logs (ignored by default in Git)
 - `tools/` (repo utilities)
   - Generate backend env var example: `tools/generate_env_example.py`

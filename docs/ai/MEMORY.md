@@ -50,6 +50,7 @@ Keep it concise, factual, and employer-facing.
   - `EMAIL_ENABLED` and `GUARD_DUTY_ENABLED` gate external dependencies; when disabled (default in Docker), email send + GuardDuty callbacks noop safely.
 - Deployment:
   - Production backend runs on AWS App Runner behind `https://api.jobapptracker.dev`, pulling ECR images built with `docker buildx --platform linux/amd64` and loading secrets from AWS Secrets Manager.
+  - GitHub Actions handle production deploys: `backend-deploy.yml` builds/pushes images and calls `scripts/deploy_apprunner.py`; `frontend-deploy.yml` builds the Vite SPA, uploads a versioned release to S3, promotes it, updates metadata, invalidates CloudFront, and runs health checks via `scripts/deploy_frontend.py`.
 - Documents:
   - Presigned S3 upload flow implemented (presign → upload to S3 → confirm).
  - Auth tokens:
@@ -71,9 +72,8 @@ Keep it concise, factual, and employer-facing.
 - CI quality gate (tests/lint/typecheck required before merge) partially implemented:
   - GitHub Actions workflows added (backend + frontend)
   - Branch protection still needs to be enabled in GitHub settings to block merges
-- Deployment automation:
-  - Need CI/CD to build/push the backend image to ECR and trigger App Runner deploys on merge to `main`.
-  - Frontend hosting pipeline still TBD; plan is to stand up AWS hosting and automate deploys once strategy is picked.
+- Deployment safeguards:
+  - CI/CD now auto-deploys backend + frontend; next steps are staged environments, alerting, and richer observability/rollback telemetry.
 - Document malware scanning fully implemented:
   - **AWS GuardDuty Malware Protection for S3** is the production scan engine.
   - EventBridge triggers a Lambda forwarder (`lambda/guardduty_scan_forwarder/`).
@@ -123,6 +123,9 @@ Keep it concise, factual, and employer-facing.
   - Backend env var example is generated at `backend/.env.example` via `tools/generate_env_example.py`.
 - Hosting upgrade:
   - Backend Dockerfile + README updated for App Runner (ECR build/push commands, `--platform linux/amd64` requirement, secrets from AWS Secrets Manager, health checks hitting `/health`).
+- CI/CD automation:
+  - `backend-deploy.yml` + `scripts/deploy_apprunner.py` build/push the API image, update App Runner, wait for health, and roll back on failure.
+  - `frontend-deploy.yml` + `scripts/deploy_frontend.py` version frontend builds in S3, promote releases, invalidate CloudFront, and keep rollback metadata in `_releases/current.json`.
 - GuardDuty + email gating:
   - Introduced `EMAIL_ENABLED` / `GUARD_DUTY_ENABLED` feature flags so local Docker can run without external services; added noop handlers + test coverage.
 - Password policy + rotation:
