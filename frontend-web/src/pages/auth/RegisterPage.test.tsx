@@ -5,22 +5,44 @@ import userEvent from "@testing-library/user-event";
 import RegisterPage from "./RegisterPage";
 import { renderWithRouter } from "../../test/testUtils";
 
-const api = vi.hoisted(() => ({
-  registerUser: vi.fn(),
-  resendVerification: vi.fn(),
+const cognitoApi = vi.hoisted(() => ({
+  cognitoSignup: vi.fn(),
 }));
 
-vi.mock("../../api", () => api);
+vi.mock("../../api/authCognito", () => cognitoApi);
+
+const turnstileCallbacks: {
+  success?: (token: string) => void;
+  error?: () => void;
+} = {};
+
+function setupTurnstileMock() {
+  turnstileCallbacks.success = undefined;
+  turnstileCallbacks.error = undefined;
+  window.turnstile = {
+    render: vi.fn((_, options: Record<string, unknown>) => {
+      turnstileCallbacks.success = options.callback as (token: string) => void;
+      turnstileCallbacks.error = options["error-callback"] as () => void;
+      return "widget-id";
+    }),
+    execute: vi.fn(() => {
+      turnstileCallbacks.success?.("turnstile-token");
+    }),
+    reset: vi.fn(),
+  };
+}
 
 describe("RegisterPage", () => {
   // api mocks are hoisted; clear call history per test
   beforeEach(() => {
     vi.clearAllMocks();
+    window.__TURNSTILE_SITE_KEY__ = "site-key";
+    setupTurnstileMock();
   });
 
   it("registers and navigates to verify page", async () => {
     const user = userEvent.setup();
-    api.registerUser.mockResolvedValueOnce({ message: "Registered. Please verify your email." });
+    cognitoApi.cognitoSignup.mockResolvedValueOnce({ message: "Account created." });
 
     renderWithRouter(<RegisterPage />, {
       route: "/register?next=%2Fjobs",
@@ -35,7 +57,13 @@ describe("RegisterPage", () => {
     await user.click(screen.getByRole("button", { name: "Create account" }));
 
     expect(await screen.findByText("VerifyRoute")).toBeInTheDocument();
-    expect((await screen.findAllByText("Registered. Please verify your email.")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/Account created/)).length).toBeGreaterThan(0);
+    expect(cognitoApi.cognitoSignup).toHaveBeenCalledWith({
+      email: "matt@example.com",
+      name: "Matt",
+      password: "Password_12345",
+      turnstile_token: "turnstile-token",
+    });
   });
 
   it("blocks weak passwords client-side and shows requirements", async () => {
@@ -48,7 +76,7 @@ describe("RegisterPage", () => {
     await user.type(screen.getByPlaceholderText("Repeat password"), "password");
     await user.click(screen.getByRole("button", { name: "Create account" }));
 
-    expect(api.registerUser).not.toHaveBeenCalled();
+    expect(cognitoApi.cognitoSignup).not.toHaveBeenCalled();
     expect(screen.getAllByText(/At least 14 characters/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/At least 14 characters/).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("Cannot be a common password")).length).toBeGreaterThan(0);
@@ -56,7 +84,7 @@ describe("RegisterPage", () => {
 
   it("renders backend violations when API returns WEAK_PASSWORD", async () => {
     const user = userEvent.setup();
-    api.registerUser.mockRejectedValueOnce(
+    cognitoApi.cognitoSignup.mockRejectedValueOnce(
       Object.assign(new Error("weak"), {
         detail: { code: "WEAK_PASSWORD", violations: ["uppercase", "number"] },
       })
@@ -70,7 +98,7 @@ describe("RegisterPage", () => {
     await user.type(screen.getByPlaceholderText("Repeat password"), "Password_12345");
     await user.click(screen.getByRole("button", { name: "Create account" }));
 
-    expect(api.registerUser).toHaveBeenCalled();
+    expect(cognitoApi.cognitoSignup).toHaveBeenCalled();
     expect((await screen.findAllByText("Cannot be a common password")).length).toBeGreaterThan(0);
   });
 
@@ -84,30 +112,18 @@ describe("RegisterPage", () => {
     await user.type(screen.getByPlaceholderText("Repeat password"), "Password_00000");
     await user.click(screen.getByRole("button", { name: "Create account" }));
 
-    expect(api.registerUser).not.toHaveBeenCalled();
+    expect(cognitoApi.cognitoSignup).not.toHaveBeenCalled();
     expect((await screen.findAllByText("Passwords do not match.")).length).toBeGreaterThan(0);
   });
 
-  it("resend verification requires email", async () => {
-    const user = userEvent.setup();
-    renderWithRouter(<RegisterPage />, { route: "/register", path: "/register" });
-
-    await user.click(screen.getByRole("button", { name: "Resend verification" }));
-    expect((await screen.findAllByText("Enter your email above first.")).length).toBeGreaterThan(0);
-  });
-
-  it("resends verification and shows info toast", async () => {
-    const user = userEvent.setup();
-    api.resendVerification.mockResolvedValueOnce({ message: "If that email exists, a verification link was sent." });
+  it("disables signup when Turnstile is not configured", () => {
+    window.__TURNSTILE_SITE_KEY__ = "";
+    window.turnstile = undefined;
 
     renderWithRouter(<RegisterPage />, { route: "/register", path: "/register" });
 
-    await user.type(screen.getByPlaceholderText("you@example.com"), "matt@example.com");
-    await user.click(screen.getByRole("button", { name: "Resend verification" }));
-
-    expect(api.resendVerification).toHaveBeenCalledWith({ email: "matt@example.com" });
-    expect((await screen.findAllByText("If that email exists, a verification link was sent.")).length).toBeGreaterThan(0);
+    expect(screen.getByText(/bot verification is not configured/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
   });
 });
-
 

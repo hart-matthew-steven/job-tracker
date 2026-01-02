@@ -40,20 +40,15 @@ ALLOWED_PREFIXES = (
     "AWS_",
     "S3_",
     "DB_",
-    "JWT_",
-    "ACCESS_",
-    "REFRESH_",
+    "COGNITO_",
     "EMAIL_",
-    "SMTP_",
-    "FROM_",
-    "RESEND_",
     "CORS_",
-    "PUBLIC_",
-    "FRONTEND_",
     "ENABLE_",
     "DOC_",
     "MAX_",
     "PASSWORD_",
+    "GUARD_",
+    "TURNSTILE_",
 )
 
 ALLOWED_EXACT = {"ENV"}
@@ -75,54 +70,29 @@ GROUPS: list[Group] = [
     ),
     Group(
         "Password policy",
-        "Password complexity + rotation controls.",
-        ("PASSWORD_MIN_LENGTH", "PASSWORD_MAX_AGE_DAYS"),
+        "Password complexity requirements.",
+        ("PASSWORD_MIN_LENGTH",),
     ),
     Group("CORS", "Comma-separated list of allowed origins for the backend.", ("CORS_ORIGINS",)),
-    Group("Auth / JWT", "Backend authentication settings.", ("JWT_SECRET", "JWT_ALGORITHM", "ACCESS_TOKEN_EXPIRE_MINUTES")),
     Group(
-        "Refresh tokens",
-        "Refresh token / cookie settings.",
-        (
-            "REFRESH_TOKEN_EXPIRE_HOURS",
-            "REFRESH_COOKIE_NAME",
-            "REFRESH_COOKIE_SAMESITE",
-            "REFRESH_COOKIE_SECURE",
-            "REFRESH_COOKIE_PATH",
-            "REFRESH_COOKIE_DOMAIN",
-        ),
+        "Cognito",
+        "Amazon Cognito configuration.",
+        ("COGNITO_REGION", "COGNITO_USER_POOL_ID", "COGNITO_APP_CLIENT_ID", "COGNITO_JWKS_CACHE_SECONDS"),
     ),
-    Group(
-        "Email (provider selection)",
-        "EMAIL_PROVIDER defaults to resend when unset. smtp is a legacy alias for gmail.",
-        ("EMAIL_PROVIDER",),
-    ),
-    Group(
-        "Email (From address)",
-        "FROM_EMAIL is used only for providers: ses, resend. Do not use it for gmail/smtp.",
-        ("FROM_EMAIL",),
-    ),
-    Group(
-        "Email (Resend)",
-        "Used when EMAIL_PROVIDER=resend.",
-        ("RESEND_API_KEY",),
-    ),
-    Group(
-        "Email (Gmail/SMTP)",
-        "Used when EMAIL_PROVIDER=gmail (or legacy smtp). From address is SMTP_FROM_EMAIL.",
-        ("SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "SMTP_USE_TLS", "SMTP_USE_SSL"),
-    ),
-    Group(
-        "Email verification",
-        "Email verification link settings.",
-        ("EMAIL_VERIFY_TOKEN_EXPIRE_HOURS", "FRONTEND_BASE_URL"),
-    ),
-    Group("Server URLs", "Used to build server-side links in some flows.", ("PUBLIC_BASE_URL",)),
     Group("Rate limiting", "SlowAPI rate limiting toggle.", ("ENABLE_RATE_LIMITING",)),
+    Group(
+        "GuardDuty Malware Protection",
+        "Feature flag for GuardDuty malware callbacks.",
+        ("GUARD_DUTY_ENABLED",),
+    ),
+    Group(
+        "Bot protection",
+        "Cloudflare Turnstile configuration.",
+        ("TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY"),
+    ),
     Group("Uploads", "Upload guardrails (max file size etc.).", ("MAX_UPLOAD_BYTES", "MAX_PENDING_UPLOADS_PER_JOB")),
     Group("AWS (S3 uploads)", "S3 bucket + prefix for document uploads.", ("AWS_REGION", "S3_BUCKET_NAME", "S3_PREFIX")),
     Group("Internal callbacks", "Shared secret for internal Lambda callbacks.", ("DOC_SCAN_SHARED_SECRET",)),
-    Group("Frontend (Vite)", "Frontend environment variables (Vite).", ("VITE_API_BASE_URL",)),
 ]
 
 
@@ -176,9 +146,10 @@ def _render(found: set[str]) -> str:
             continue
         lines.append(f"## {g.title}")
         lines.append(f"# {g.comment}")
-        for k in sorted(set(present)):
-            lines.append(k + "=")
-            used.add(k)
+        for k in g.keys:
+            if k in present and k not in used:
+                lines.append(k + "=")
+                used.add(k)
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"

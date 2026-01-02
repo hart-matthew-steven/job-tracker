@@ -1,12 +1,32 @@
 // src/pages/auth/RegisterPage.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
 import type { FormEvent } from "react";
 
-import { registerUser, resendVerification } from "../../api";
+import { cognitoSignup } from "../../api/authCognito";
 import { useToast } from "../../components/ui/toast";
 import { evaluatePassword, describeViolation, PASSWORD_MIN_LENGTH, type PasswordViolation } from "../../lib/passwordPolicy";
 import PasswordRequirements from "../../components/forms/PasswordRequirements";
+
+declare global {
+  interface Window {
+    turnstile?: {
+      render: (container: HTMLElement, options: Record<string, unknown>) => string;
+      execute: (widgetId: string) => void;
+      reset: (widgetId: string) => void;
+    };
+    __TURNSTILE_SITE_KEY__?: string;
+  }
+}
+
+const TURNSTILE_SCRIPT_ID = "cf-turnstile-script";
+const TURNSTILE_API_URL = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+
+function resolveTurnstileSiteKey(): string {
+  const override = typeof window !== "undefined" ? window.__TURNSTILE_SITE_KEY__ ?? "" : "";
+  const fromEnv = (import.meta.env.VITE_TURNSTILE_SITE_KEY ?? "").trim();
+  return (override || fromEnv).trim();
+}
 
 function safeNext(nextRaw: string | null) {
   const v = (nextRaw || "").trim();
@@ -21,6 +41,7 @@ export default function RegisterPage() {
   const toast = useToast();
 
   const next = useMemo(() => safeNext(searchParams.get("next")), [searchParams]);
+  const turnstileSiteKey = resolveTurnstileSiteKey();
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -31,6 +52,10 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [serverViolations, setServerViolations] = useState<PasswordViolation[]>([]);
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const turnstileContainerRef = useRef<HTMLDivElement | null>(null);
+  const turnstileWidgetIdRef = useRef<string | null>(null);
+  const pendingTurnstileRef = useRef<{ resolve: (token: string) => void; reject: (err: Error) => void } | null>(null);
 
   const normalizedName = name.trim();
   const normalizedEmail = email.trim().toLowerCase();
@@ -47,6 +72,99 @@ export default function RegisterPage() {
   useEffect(() => {
     setServerViolations([]);
   }, [password, normalizedEmail, normalizedName]);
+
+  useEffect(() => {
+    if (!turnstileSiteKey || !turnstileContainerRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const emitError = (message: string) => {
+      if (cancelled) return;
+      const err = new Error(message);
+      setError(err.message);
+      toast.error(err.message, "Register");
+      pendingTurnstileRef.current?.reject(err);
+      pendingTurnstileRef.current = null;
+      setTurnstileToken("");
+    };
+
+    const renderWidget = () => {
+      if (!window.turnstile || !turnstileContainerRef.current || turnstileWidgetIdRef.current || cancelled) {
+        return;
+      }
+      turnstileWidgetIdRef.current = window.turnstile.render(turnstileContainerRef.current, {
+        sitekey: turnstileSiteKey,
+        size: "invisible",
+        callback: (token: string) => {
+          if (cancelled) return;
+          setTurnstileToken(token);
+          pendingTurnstileRef.current?.resolve(token);
+          pendingTurnstileRef.current = null;
+        },
+        "error-callback": () => emitError("Verification failed. Please try again."),
+        "timeout-callback": () => emitError("Verification timed out. Please try again."),
+      }) as string;
+    };
+
+    const handleScriptLoad = () => {
+      const script = document.getElementById(TURNSTILE_SCRIPT_ID);
+      if (script) {
+        script.setAttribute("data-loaded", "true");
+      }
+      renderWidget();
+    };
+
+    const handleScriptError = () => emitError("Unable to load verification. Please try again later.");
+
+    if (window.turnstile) {
+      renderWidget();
+    } else {
+      let script = document.getElementById(TURNSTILE_SCRIPT_ID) as HTMLScriptElement | null;
+      if (!script) {
+        script = document.createElement("script");
+        script.id = TURNSTILE_SCRIPT_ID;
+        script.src = TURNSTILE_API_URL;
+        script.async = true;
+        script.defer = true;
+        script.onload = handleScriptLoad;
+        script.onerror = handleScriptError;
+        document.body.appendChild(script);
+      } else if (script.getAttribute("data-loaded") === "true") {
+        renderWidget();
+      } else {
+        script.addEventListener("load", handleScriptLoad, { once: true });
+        script.addEventListener("error", handleScriptError, { once: true });
+      }
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [turnstileSiteKey, toast]);
+
+  async function requestTurnstileToken(): Promise<string> {
+    if (!turnstileSiteKey) {
+      throw new Error("Signup is temporarily unavailable.");
+    }
+    if (turnstileToken) {
+      return turnstileToken;
+    }
+    if (!window.turnstile || !turnstileWidgetIdRef.current) {
+      throw new Error("Verification is still loading. Please wait a moment and try again.");
+    }
+
+    return new Promise<string>((resolve, reject) => {
+      pendingTurnstileRef.current = { resolve, reject };
+      try {
+        window.turnstile.execute(turnstileWidgetIdRef.current!);
+      } catch (_err) {
+        pendingTurnstileRef.current = null;
+        reject(new Error("Verification failed. Please try again."));
+      }
+    });
+  }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -83,12 +201,26 @@ export default function RegisterPage() {
     }
 
     setBusy(true);
+    let captchaToken: string | null = null;
     try {
-      const res = await registerUser({ name: eName, email: eEmail, password });
-      setMessage(res?.message ?? "Registered. Please verify your email.");
-      toast.success(res?.message ?? "Registered. Please verify your email.", "Register");
+      captchaToken = await requestTurnstileToken();
+    } catch (err) {
+      const msg = (err as { message?: string } | null)?.message ?? "Verification failed. Please try again.";
+      setError(msg);
+      toast.error(msg, "Register");
+      setBusy(false);
+      return;
+    }
 
-      // Send user to Verify page so they can resend if needed.
+    try {
+      const res = await cognitoSignup({ name: eName, email: eEmail, password, turnstile_token: captchaToken });
+      const status = (res?.status ?? "CONFIRMATION_REQUIRED").toUpperCase();
+      const successMessage =
+        status === "CONFIRMATION_REQUIRED"
+          ? "Account created. Enter the verification code we emailed you."
+          : res?.message ?? "Account created.";
+      setMessage(successMessage);
+      toast.success(successMessage, "Register");
       nav(`/verify?email=${encodeURIComponent(eEmail)}&next=${encodeURIComponent(next)}`, { replace: true });
     } catch (err) {
       const apiErr = err as { message?: string; detail?: { code?: string; violations?: string[] } } | null;
@@ -105,37 +237,15 @@ export default function RegisterPage() {
       }
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function onResend() {
-    setError("");
-    setMessage("");
-
-    const eEmail = email.trim().toLowerCase();
-    if (!eEmail) {
-      const msg = "Enter your email above first.";
-      setError(msg);
-      toast.error(msg, "Register");
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const res = await resendVerification({ email: eEmail });
-      setMessage(res?.message ?? "If that email exists, a verification link was sent.");
-      toast.info(res?.message ?? "If that email exists, a verification link was sent.", "Verification");
-    } catch (err) {
-      const errObj = err as { message?: string } | null;
-      const msg = errObj?.message ?? "Resend failed";
-      setError(msg);
-      toast.error(msg, "Verification");
-    } finally {
-      setBusy(false);
+      if (captchaToken && window.turnstile && turnstileWidgetIdRef.current) {
+        window.turnstile.reset(turnstileWidgetIdRef.current);
+      }
+      setTurnstileToken("");
     }
   }
 
   const loginLink = `/login?next=${encodeURIComponent(next)}`;
+  const signupDisabled = !turnstileSiteKey;
 
   return (
     <div className="space-y-5">
@@ -151,15 +261,39 @@ export default function RegisterPage() {
         </div>
       )}
 
+      {signupDisabled && (
+        <div className="rounded-lg border border-amber-500/60 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+          Signup is temporarily unavailable because bot verification is not configured.
+        </div>
+      )}
+
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Name</label>
-          <input type="text" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-slate-700" placeholder="Your name" disabled={busy} required />
+          <input
+            type="text"
+            autoComplete="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-slate-700"
+            placeholder="Your name"
+            disabled={busy}
+            required
+          />
         </div>
 
         <div>
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Email</label>
-          <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-slate-700" placeholder="you@example.com" disabled={busy} required />
+          <input
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-slate-700"
+            placeholder="you@example.com"
+            disabled={busy}
+            required
+          />
         </div>
 
         <div>
@@ -203,25 +337,35 @@ export default function RegisterPage() {
           </div>
         )}
 
-        <button type="submit" disabled={busy} className={[ "w-full rounded-lg px-3 py-2 text-sm font-semibold transition border", busy ? "cursor-not-allowed border-slate-300 bg-slate-100 text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-500" : "border-slate-300 bg-slate-900 text-white hover:bg-slate-800 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-100 dark:hover:bg-slate-800", ].join(" ")}>
+        <button
+          type="submit"
+          disabled={busy || signupDisabled}
+          className={[
+            "w-full rounded-lg px-3 py-2 text-sm font-semibold transition border",
+            busy
+              ? "cursor-not-allowed border-slate-300 bg-slate-100 text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-500"
+              : "border-slate-300 bg-slate-900 text-white hover:bg-slate-800 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-100 dark:hover:bg-slate-800",
+          ].join(" ")}
+        >
           {busy ? "Creating account…" : "Create account"}
         </button>
+        <div ref={turnstileContainerRef} className="hidden" aria-hidden="true" />
       </form>
 
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm text-slate-600 dark:text-slate-400">
-          Already have an account?{" "}
-          <NavLink to={loginLink} className="text-blue-700 hover:text-blue-800 font-semibold dark:text-blue-300 dark:hover:text-blue-200">
-            Sign in
-          </NavLink>
-        </div>
-
-        <button type="button" onClick={onResend} disabled={busy} className={[ "rounded-lg px-3 py-2 text-xs font-semibold transition border", busy ? "cursor-not-allowed border-slate-300 bg-slate-100 text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-500" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900", ].join(" ")} title="Sends a new verification email">
-          Resend verification
-        </button>
+      <div className="text-sm text-slate-600 dark:text-slate-400">
+        Already have an account?{" "}
+        <NavLink
+          to={loginLink}
+          className="text-blue-700 hover:text-blue-800 font-semibold dark:text-blue-300 dark:hover:text-blue-200"
+        >
+          Sign in
+        </NavLink>
       </div>
 
-      <div className="text-xs text-slate-500">We’ll email you a verification link. If you don’t see it, check spam or resend.</div>
+      <div className="text-xs text-slate-500 dark:text-slate-400">
+        After registration, check your inbox (and spam) for the Cognito verification code. Keep this page open so you can
+        enter the code immediately.
+      </div>
     </div>
   );
 }

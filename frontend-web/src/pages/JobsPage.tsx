@@ -53,6 +53,16 @@ export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [collapsedCards, setCollapsedCards] = useState({
+    notes: false,
+    interviews: false,
+    timeline: false,
+    documents: false,
+  });
+  const toggleCard = (key: keyof typeof collapsedCards) => {
+    setCollapsedCards((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
 
   type JobFormState = {
     company_name: string;
@@ -884,12 +894,22 @@ export default function JobsPage() {
             <div className="space-y-6">
               <JobDetailsCard job={selectedJob} onStatusChange={handleStatusChange} onTagsChange={handleTagsChange} />
 
-              <NotesCard notes={notes} noteText={noteText} setNoteText={setNoteText} onAddNote={handleAddNote} onDeleteNote={handleDeleteNote} />
+              <NotesCard
+                notes={notes}
+                noteText={noteText}
+                setNoteText={setNoteText}
+                onAddNote={handleAddNote}
+                onDeleteNote={handleDeleteNote}
+                collapsed={collapsedCards.notes}
+                onToggleCollapse={() => toggleCard("notes")}
+              />
 
               <InterviewsCard
                 items={interviews}
                 loading={loadingInterviews}
                 error={interviewsError}
+                collapsed={collapsedCards.interviews}
+                onToggleCollapse={() => toggleCard("interviews")}
                 onCreate={async (draft) => {
                   if (!selectedJob) return;
                   try {
@@ -924,10 +944,18 @@ export default function JobsPage() {
                 }}
               />
 
-              <TimelineCard items={activity} loading={loadingActivity} error={activityError} />
+              <TimelineCard
+                items={activity}
+                loading={loadingActivity}
+                error={activityError}
+                collapsed={collapsedCards.timeline}
+                onToggleCollapse={() => toggleCard("timeline")}
+              />
 
               <DocumentsPanel
                 jobId={selectedJob.id}
+                collapsed={collapsedCards.documents}
+                onToggleCollapse={() => toggleCard("documents")}
                 onActivityChange={(iso) => {
                   bumpSelectedJobActivity(iso);
                   void refreshActivity();

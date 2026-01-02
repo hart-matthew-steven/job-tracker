@@ -18,30 +18,45 @@ Guidelines:
 
 ---
 
-## Auth
+## Auth (`/auth/cognito/*`)
 
-- `POST /auth/register`
+- `POST /auth/cognito/signup`
   - Auth: none
-  - Notes: requires `name`, `email`, `password`; prints a verify link in dev
+  - Body: `{ email, password, name, turnstile_token }`
+  - Notes: backend verifies Cloudflare Turnstile token before calling Cognito `SignUp`
 
-- `GET /auth/verify?token=...`
+- `POST /auth/cognito/confirm`
   - Auth: none
-  - Notes: verifies email token
+  - Body: `{ email, code }`
 
-- `POST /auth/resend-verification`
+- `POST /auth/cognito/login`
   - Auth: none
+  - Body: `{ email, password }`
+  - Notes: returns `{status:"OK",tokens:{...}}` on success or `{status:"CHALLENGE",next_step,session}` when Cognito requires MFA/setup
 
-- `POST /auth/login`
+- `POST /auth/cognito/challenge`
   - Auth: none
-  - Notes: returns access token + sets HttpOnly refresh cookie
+  - Body: `{ email, challenge_name, session, responses }`
+  - Notes: wraps Cognito `RespondToAuthChallenge` (e.g., SOFTWARE_TOKEN_MFA)
 
-- `POST /auth/refresh`
-  - Auth: refresh cookie
-  - Notes: rotates refresh token; returns new access token
+- `POST /auth/cognito/mfa/setup`
+  - Auth: none
+  - Body: `{ session, label? }`
+  - Notes: calls Cognito `AssociateSoftwareToken`, returns `{secret_code, otpauth_uri, session}`
 
-- `POST /auth/logout`
-  - Auth: refresh cookie
-  - Notes: revokes refresh token + clears cookie
+- `POST /auth/cognito/mfa/verify`
+  - Auth: none
+  - Body: `{ email, session, code, friendly_name? }`
+  - Notes: calls `VerifySoftwareToken`, then `RespondToAuthChallenge` with `ANSWER=SUCCESS`
+
+- `POST /auth/cognito/refresh`
+  - Auth: none
+  - Body: `{ refresh_token }`
+  - Notes: proxies Cognito `REFRESH_TOKEN_AUTH`, returns updated tokens
+
+- `POST /auth/cognito/logout`
+  - Auth: Bearer (optional)
+  - Notes: best-effort API parity—clears SPA session; no server-side refresh store exists
 
 ---
 

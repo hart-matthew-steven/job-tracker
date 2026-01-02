@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import VerifyEmailPage from "./VerifyEmailPage";
 import { renderWithRouter } from "../../test/testUtils";
@@ -8,12 +9,11 @@ const router = vi.hoisted(() => ({
   nav: vi.fn(),
 }));
 
-const api = vi.hoisted(() => ({
-  verifyEmail: vi.fn(),
-  resendVerification: vi.fn(),
+const cognitoApi = vi.hoisted(() => ({
+  cognitoConfirm: vi.fn(),
 }));
 
-vi.mock("../../api", () => api);
+vi.mock("../../api/authCognito", () => cognitoApi);
 
 vi.mock("react-router-dom", async () => {
   const mod = await import("react-router-dom");
@@ -26,42 +26,42 @@ vi.mock("react-router-dom", async () => {
 describe("VerifyEmailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("shows informational message when token is missing but email is known", async () => {
+  it("submits code and redirects to login", async () => {
+    cognitoApi.cognitoConfirm.mockResolvedValueOnce({ message: "Account verified." });
+
     renderWithRouter(<VerifyEmailPage />, {
       route: "/verify?email=a%40b.com&next=%2Fjobs",
       path: "/verify",
     });
 
-    expect(
-      (await screen.findAllByText("We emailed a verification link to a@b.com. Check your inbox or resend it below.")).length
-    ).toBeGreaterThan(0);
-    expect(api.verifyEmail).not.toHaveBeenCalled();
+    await screen.findByPlaceholderText("you@example.com");
+    const emailInput = screen.getByPlaceholderText("you@example.com");
+    await userEvent.clear(emailInput);
+    await userEvent.type(emailInput, "a@b.com");
+    await userEvent.type(screen.getByPlaceholderText("6-digit code"), "123456");
+    await userEvent.click(screen.getByRole("button", { name: "Confirm account" }));
+
+    await waitFor(() => expect(cognitoApi.cognitoConfirm).toHaveBeenCalledWith({ email: "a@b.com", code: "123456" }));
+    expect(router.nav).toHaveBeenCalledWith("/login?next=%2Fjobs", { replace: true });
   });
 
-  it("verifies, shows success toast, then redirects to login", async () => {
-    vi.useFakeTimers();
-    api.verifyEmail.mockResolvedValueOnce({ message: "Email verified. You can now log in." });
+  it("shows error when API rejects", async () => {
+    cognitoApi.cognitoConfirm.mockRejectedValueOnce(new Error("Code expired"));
 
     renderWithRouter(<VerifyEmailPage />, {
-      route: "/verify?token=tok123&next=%2Fjobs",
+      route: "/verify",
       path: "/verify",
     });
 
-    // Let the verifyEmail promise resolve and the redirect timeout be scheduled.
-    await Promise.resolve();
-    await Promise.resolve();
+    const emailInput = screen.getByPlaceholderText("you@example.com");
+    await userEvent.clear(emailInput);
+    await userEvent.type(emailInput, "a@b.com");
+    await userEvent.type(screen.getByPlaceholderText("6-digit code"), "123456");
+    await userEvent.click(screen.getByRole("button", { name: "Confirm account" }));
 
-    await vi.advanceTimersByTimeAsync(950);
-
-    expect(api.verifyEmail).toHaveBeenCalledWith("tok123");
-    expect(router.nav).toHaveBeenCalledWith("/login?next=%2Fjobs", { replace: true });
+    expect((await screen.findAllByText(/Code expired/)).length).toBeGreaterThan(0);
   });
 });
-
-

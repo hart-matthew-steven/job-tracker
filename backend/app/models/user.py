@@ -1,4 +1,5 @@
 # app/models/user.py
+"""User model for Cognito-backed authentication."""
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, func
 from sqlalchemy.orm import relationship
 
@@ -10,44 +11,32 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
+    # --- Identity fields ---
     email = Column(String(255), unique=True, index=True, nullable=False)
-    name = Column(String(100), nullable=True)
-    # User preference: Jobs auto-refresh interval in seconds. 0 = off.
+    name = Column(String(100), nullable=False)
+
+    cognito_sub = Column(String(255), unique=True, index=True, nullable=False)
+    auth_provider = Column(String(20), nullable=False, server_default="cognito")
+
+    # --- User preferences ---
+    # Jobs auto-refresh interval in seconds. 0 = off.
     auto_refresh_seconds = Column(Integer, nullable=False, server_default="0")
-    # User preference: appearance theme (dark/light/system). UI currently uses dark, but store anyway.
+    # Appearance theme (dark/light/system). UI currently uses dark, but store anyway.
     theme = Column(String(20), nullable=False, server_default="dark")
-    # User preference: default job list sort mode (e.g. updated_desc/company_asc/status_asc)
+    # Default job list sort mode (e.g. updated_desc/company_asc/status_asc)
     default_jobs_sort = Column(String(30), nullable=False, server_default="updated_desc")
-    # User preference: default jobs "view" chip (all/active/needs_followup)
+    # Default jobs "view" chip (all/active/needs_followup)
     default_jobs_view = Column(String(30), nullable=False, server_default="all")
-    # User preference: data retention in days (0 = keep forever)
+    # Data retention in days (0 = keep forever)
     data_retention_days = Column(Integer, nullable=False, server_default="0")
-    password_hash = Column(String(255), nullable=False)
-    password_changed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    token_version = Column(Integer, nullable=False, server_default="0", default=0)
 
+    # --- Status flags ---
     is_active = Column(Boolean, nullable=False, server_default="true")
-    is_email_verified = Column(Boolean, nullable=False, server_default="false")
-
-    email_verified_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # ✅ user → job applications
     job_applications = relationship(
         "JobApplication",
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
-
-    # ✅ user → refresh tokens
-    refresh_tokens = relationship(
-        "RefreshToken",
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
-
-    email_verification_tokens = relationship(
-        "EmailVerificationToken",
         back_populates="user",
         cascade="all, delete-orphan",
     )

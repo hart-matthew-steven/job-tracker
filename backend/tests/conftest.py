@@ -1,9 +1,3 @@
-import os
-from datetime import datetime, timezone
-
-# Ensure JWT_SECRET exists before importing app.main (it calls require_jwt_secret() at import time).
-os.environ.setdefault("JWT_SECRET", "test_jwt_secret")
-
 from contextlib import contextmanager
 
 import pytest
@@ -15,7 +9,6 @@ import importlib
 
 from app.core.base import Base
 from app.core import config as app_config
-from app.core.security import hash_password
 
 # Import models so they register with SQLAlchemy metadata.
 from app.models.user import User  # noqa: F401
@@ -26,10 +19,8 @@ from app.models.job_document import JobDocument  # noqa: F401
 from app.models.job_activity import JobActivity  # noqa: F401
 from app.models.job_interview import JobInterview  # noqa: F401
 from app.models.saved_view import SavedView  # noqa: F401
-from app.models.refresh_token import RefreshToken  # noqa: F401
 
 from app.core.database import get_db
-from app.dependencies.auth import get_current_user
 
 
 @pytest.fixture(scope="session")
@@ -94,11 +85,6 @@ def _reset_mutable_settings():
         "DOC_SCAN_SHARED_SECRET",
         "ENABLE_RATE_LIMITING",
         "PASSWORD_MIN_LENGTH",
-        "PASSWORD_MAX_AGE_DAYS",
-        "EMAIL_ENABLED",
-        "EMAIL_PROVIDER",
-        "RESEND_API_KEY",
-        "FROM_EMAIL",
         "GUARD_DUTY_ENABLED",
     ]
     original = {k: getattr(app_config.settings, k) for k in keys}
@@ -112,15 +98,15 @@ def _reset_mutable_settings():
 
 
 @pytest.fixture()
-def app(db_session):
-    # Ensure settings has a JWT secret even if imported earlier.
-    app_config.settings.JWT_SECRET = app_config.settings.JWT_SECRET or "test_jwt_secret"
-    # Default to disabled for the general test suite.
+def app(db_session, monkeypatch):
+    # Ensure required Cognito settings exist for tests.
+    app_config.settings.COGNITO_REGION = app_config.settings.COGNITO_REGION or "us-east-1"
+    app_config.settings.COGNITO_USER_POOL_ID = app_config.settings.COGNITO_USER_POOL_ID or "local-test-pool"
+    app_config.settings.COGNITO_APP_CLIENT_ID = app_config.settings.COGNITO_APP_CLIENT_ID or "test-client-id"
+    app_config.settings.COGNITO_JWKS_CACHE_SECONDS = 60
     app_config.settings.ENABLE_RATE_LIMITING = False
 
-    # IMPORTANT:
-    # SlowAPI decorators bind at import time, so we reload the routes + app with rate limiting disabled
-    # to avoid cross-test contamination (the rate limiting test reloads modules with it enabled).
+    # SlowAPI decorators bind at import time, so reload routes with latest settings.
     import app.routes.documents as documents_routes
     import app.main as main
 
@@ -131,6 +117,38 @@ def app(db_session):
     def override_get_db():
         yield db_session
     fastapi_app.dependency_overrides[get_db] = override_get_db
+
+    # Stub Cognito verification + profile lookups so tests do not call AWS.
+    from app.auth import cognito as cognito_module
+    from app.services import cognito_client as cognito_service
+
+    class _FakeVerifyError(cognito_module.CognitoInvalidTokenError):
+        pass
+
+    def _fake_verify(token: str):
+        if not token.startswith("test-sub:"):
+            raise _FakeVerifyError("invalid token")
+        sub = token.split("test-sub:", 1)[1]
+        return {
+            "sub": sub,
+            "token_use": "access",
+            "client_id": app_config.settings.COGNITO_APP_CLIENT_ID,
+            "iss": "https://example.invalid/local",
+            "email": f"{sub}@example.test",
+        }
+
+    def _fake_get_user(access_token: str):
+        sub = access_token.split("test-sub:", 1)[1] if "test-sub:" in access_token else "unknown"
+        return {
+            "sub": sub,
+            "email": f"{sub}@example.test",
+            "name": "Test User",
+            "Username": sub,
+        }
+
+    monkeypatch.setattr(cognito_module, "verify_cognito_jwt", _fake_verify)
+    monkeypatch.setattr(cognito_service, "cognito_get_user", _fake_get_user)
+
     yield fastapi_app
     fastapi_app.dependency_overrides.clear()
 
@@ -138,23 +156,21 @@ def app(db_session):
 @pytest.fixture()
 def users(db_session):
     """
-    Two distinct active, verified users for ownership / isolation tests.
+    Two distinct active Cognito-backed users for ownership / isolation tests.
     """
     user_a = User(
-        email="test@example.com",
+        email="sub-test-user@example.test",
         name="Test User",
-        password_hash=hash_password("test_password_123"),
+        cognito_sub="sub-test-user",
+        auth_provider="cognito",
         is_active=True,
-        is_email_verified=True,
-        password_changed_at=datetime.now(timezone.utc),
     )
     user_b = User(
-        email="other@example.com",
+        email="sub-other-user@example.test",
         name="Other User",
-        password_hash=hash_password("test_password_123"),
+        cognito_sub="sub-other-user",
+        auth_provider="cognito",
         is_active=True,
-        is_email_verified=True,
-        password_changed_at=datetime.now(timezone.utc),
     )
     db_session.add_all([user_a, user_b])
     db_session.commit()
@@ -169,10 +185,9 @@ def client(app, users):
     Default client authenticated as user_a.
     """
     user_a, _ = users
-    app.dependency_overrides[get_current_user] = lambda: user_a
-    with TestClient(app) as c:
+    headers = {"Authorization": f"Bearer test-sub:{user_a.cognito_sub}"}
+    with TestClient(app, headers=headers) as c:
         yield c
-    app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.fixture()
@@ -187,11 +202,17 @@ def client_for(app):
 
     @contextmanager
     def _client_for(user: User):
-        app.dependency_overrides[get_current_user] = lambda: user
-        with TestClient(app) as c:
+        headers = {"Authorization": f"Bearer test-sub:{user.cognito_sub}"}
+        with TestClient(app, headers=headers) as c:
             yield c
-        app.dependency_overrides.pop(get_current_user, None)
 
     return _client_for
+
+
+@pytest.fixture()
+def anonymous_client(app):
+    """Client without Authorization header (for testing 401 responses)."""
+    with TestClient(app) as c:
+        yield c
 
 

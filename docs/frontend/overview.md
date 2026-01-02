@@ -25,15 +25,17 @@ This document describes the frontend structure and conventions at a high level.
 Expected entry points:
 - `frontend-web/src/main.tsx`
 - `frontend-web/src/App.tsx`
+- `frontend-web/src/api/authCognito.ts` (Cognito Option-B client)
 
 Recommended organization:
 - `src/pages/` for route-level views
 - `src/pages/account/` for account/profile/settings screens
+- `src/pages/auth/` for login/register/confirm/MFA (Cognito flow)
 - `src/routes/` for route path constants
 - `src/components/` for reusable UI components
 - `src/components/jobs/` for job-related UI (list/detail/notes)
 - `src/components/layout/` for shell/layout building blocks (e.g., `AppShell.tsx`)
-- `src/api.ts` for backend calls
+- `src/api.ts` for backend calls, `src/api/authCognito.ts` for Cognito `/auth/cognito/*`
 - `src/hooks/` for shared logic
 - `src/types/` for shared domain + API DTO types
 
@@ -47,8 +49,8 @@ Notable hooks:
 
 - Keep components small and focused
 - Prefer predictable patterns over clever abstraction
-- Do not scatter API calls across unrelated components
-- Preserve UI behavior during refactors unless explicitly changing UX
+- Centralize API calls (either `src/api.ts` or `src/api/authCognito.ts`)
+- Cognito access/id/refresh tokens live in memory + `sessionStorage`. When you need to clear auth, call `useAuth().logout()` so the storage tier is wiped and the backend sees the logout best-effort request (`/auth/cognito/logout`).
 
 ---
 

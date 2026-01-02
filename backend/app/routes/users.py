@@ -1,18 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.password_policy import ensure_strong_password, mark_password_changed, password_is_expired
-from app.core.security import hash_password, verify_password
 from app.dependencies.auth import get_current_user
-from app.models.refresh_token import RefreshToken
 from app.models.user import User
-from app.schemas.auth import MessageOut
-from app.schemas.user import ChangePasswordIn, UpdateSettingsIn, UserMeOut, UserSettingsOut
+from app.schemas.common import MessageOut
+from app.schemas.user import UpdateSettingsIn, UserMeOut, UserSettingsOut
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -24,10 +19,7 @@ def get_me(user: User = Depends(get_current_user)) -> UserMeOut:
         email=user.email,
         name=user.name,
         auto_refresh_seconds=user.auto_refresh_seconds,
-        is_email_verified=user.is_email_verified,
         created_at=user.created_at,
-        email_verified_at=user.email_verified_at,
-        must_change_password=password_is_expired(user),
     )
 
 
@@ -50,42 +42,5 @@ def update_my_settings(
     db.add(user)
     db.commit()
     return {"message": "Settings updated"}
-
-
-@router.post("/me/change-password", response_model=MessageOut)
-def change_password(
-    payload: ChangePasswordIn,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    if not verify_password(payload.current_password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
-
-    if payload.current_password == payload.new_password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="New password must be different from current password",
-        )
-
-    ensure_strong_password(payload.new_password, email=user.email, username=user.name)
-
-    # Update password hash
-    user.password_hash = hash_password(payload.new_password)
-    mark_password_changed(user)
-    user.token_version = int((user.token_version or 0) + 1)
-    db.add(user)
-
-    # Revoke all refresh tokens (forces re-login everywhere)
-    now = datetime.now(timezone.utc)
-    (
-        db.query(RefreshToken)
-        .filter(RefreshToken.user_id == user.id)
-        .filter(RefreshToken.revoked_at.is_(None))
-        .update({RefreshToken.revoked_at: now}, synchronize_session=False)
-    )
-
-    db.commit()
-
-    return {"message": "Password updated. Please log in again."}
 
 

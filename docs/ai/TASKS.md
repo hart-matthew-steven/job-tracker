@@ -6,10 +6,19 @@
   - GitHub Actions workflows added
   - Branch protection (required checks) needs to be enabled in GitHub UI
 
-- Email delivery: Resend provider + env var contract:
-  - Default email provider is `resend`
-  - Supported: `resend`, `ses`, `gmail` (legacy alias: `smtp` → `gmail`)
-  - Backend env var example generated at `backend/.env.example`
+### Cognito Auth Migration
+- [Migration Plan](docs/architecture/security.md#cognito-authentication-migration-plan)
+- Work is split into tightly scoped chunks:
+  - **Chunk 0** (completed): docs + placeholders only
+  - **Chunk 1** (completed): backend read-only Cognito JWT verifier (historical toggle removed; backend now always enforces Cognito)
+  - **Chunk 2** (completed): unified identity model (`Identity` dataclass), `/auth/debug/identity`
+  - **Chunk 3** (retired): original profile gate removed in Chunk 5
+  - **Chunk 4** (completed): backend authorization + JIT provisioning; Cognito became the primary auth source
+  - **Chunk 5** (completed): remove profile gate + add Cognito Option B (BFF) endpoints for signup/login/MFA (no redirects)
+  - **Chunk 6** (completed): deterministic challenge handling + required TOTP setup/verify flows
+  - **Chunk 7** (completed): production cutover — only Cognito tokens accepted, refresh endpoint wired, SPA stores tokens in sessionStorage/in-memory
+  - **Chunk 8** (completed): Cloudflare Turnstile bot protection on signup (frontend widget + backend verification before calling Cognito)
+- Future chunks: passkeys, native iOS flows, AI usage/billing attribution, security hardening.
 
 ## Next
 - Deployment safeguards:
@@ -36,14 +45,10 @@
   - Added: `lambda/guardduty_scan_forwarder/` (EventBridge → Lambda → backend callback)
   - Backend/frontend unchanged (same DB fields, internal callback API, download gating)
   - Architecture docs updated (`docs/architecture/security.md`, `docs/architecture/data-flow.md`)
-- **Email delivery refactor**:
-  - Default provider: `resend` (with fallback to `ses`, `gmail`/`smtp`)
-  - Environment variable contract: `EMAIL_PROVIDER`, `FROM_EMAIL`, `RESEND_API_KEY`, `AWS_REGION`
-  - Backend `.env.example` generated and documented
-- Strong password policy + rotation:
-  - Added `PASSWORD_MIN_LENGTH` / `PASSWORD_MAX_AGE_DAYS`, `password_changed_at`, and `must_change_password` responses.
-  - Backend enforces requirements (uppercase/lowercase/number/special/denylist/no email/name) when registering/changing passwords.
-  - Frontend mirrors the helper/UI requirements and blocks navigation until expired passwords are updated.
+- Legacy email service removed (now handled via Cognito + future Lambda trigger). Env vars (`EMAIL_*`, `RESEND_API_KEY`, `SMTP_*`) were deleted from config/docs.
+- Strong password policy:
+  - `PASSWORD_MIN_LENGTH` still enforced for Cognito signup helpers (`ensure_strong_password`).
+  - Rotation-specific fields (`password_changed_at`, `token_version`, `PASSWORD_MAX_AGE_DAYS`) were removed during the Cognito cutover.
 - Database credential split:
   - Replaced legacy `DB_USER`/`DB_PASSWORD` with `DB_APP_*` (runtime CRUD) and `DB_MIGRATOR_*` (DDL) env vars.
   - Alembic + docs + `.env.example` now point at the migrator URL; runtime engine stays on the least-privilege user.
@@ -77,5 +82,3 @@
 - Refactor frontend: split `frontend-web/src/App.tsx` (extract pages/components/hooks), add `src/routes/paths.ts`, and group job components under `src/components/jobs/`.
 - Consolidate backend user/settings responses (use dedicated settings schema for `/users/me/settings`)
 - Phase 2: dev reset script implemented: `temp_scripts/reset_dev_db.py` (guardrails, S3 cleanup, logs, `--yes`)
-
-

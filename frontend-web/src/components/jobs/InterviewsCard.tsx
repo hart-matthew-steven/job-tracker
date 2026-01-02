@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { JobInterview } from "../../types/api";
 import Modal from "../ui/Modal";
+import CollapseToggle from "../ui/CollapseToggle";
 
 function fmtDateTime(dt: string | null | undefined) {
   if (!dt) return "—";
@@ -45,9 +46,19 @@ type Props = {
   error?: string;
   onCreate: (draft: Draft) => Promise<void> | void;
   onDelete: (id: number) => Promise<void> | void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 };
 
-export default function InterviewsCard({ items, loading = false, error = "", onCreate, onDelete }: Props) {
+export default function InterviewsCard({
+  items,
+  loading = false,
+  error = "",
+  onCreate,
+  onDelete,
+  collapsed = false,
+  onToggleCollapse,
+}: Props) {
   const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-200";
   const fieldClass =
     "mt-1 w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-600/30 " +
@@ -73,58 +84,65 @@ export default function InterviewsCard({ items, loading = false, error = "", onC
 
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-xl font-semibold">Interviews</div>
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="rounded-lg px-3 py-2 text-xs font-semibold transition border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
-        >
-          + Add interview
-        </button>
-      </div>
-
-      {error && (
-        <div className="mt-3 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm text-red-200">
-          {error}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="rounded-lg px-3 py-2 text-xs font-semibold transition border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
+          >
+            + Add interview
+          </button>
+          {onToggleCollapse && <CollapseToggle collapsed={collapsed} onToggle={onToggleCollapse} label="interviews section" />}
         </div>
-      )}
-
-      {loading && <div className="mt-3 text-sm text-slate-400">Loading…</div>}
-
-      {!loading && !error && (!sorted || sorted.length === 0) && (
-        <div className="mt-3 text-sm text-slate-400">No interviews yet.</div>
-      )}
-
-      <div className="mt-4 space-y-3">
-        {sorted?.map((iv) => (
-          <div key={iv.id} className="rounded-lg border border-slate-800 bg-slate-950/30 px-4 py-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-100">
-                  {fmtDateTime(iv.scheduled_at)}{" "}
-                  <span className="text-slate-400 font-medium">
-                    ({(iv.status ?? "scheduled").toLowerCase()})
-                  </span>
-                </div>
-                <div className="mt-1 text-xs text-slate-400">
-                  {[iv.stage, iv.kind, iv.interviewer].filter(Boolean).join(" • ") || "—"}
-                </div>
-                {iv.location && <div className="mt-1 text-xs text-slate-500 break-words">{iv.location}</div>}
-                {iv.notes && <div className="mt-2 text-sm text-slate-200 whitespace-pre-wrap break-words">{iv.notes}</div>}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => onDelete(iv.id)}
-                className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition border border-red-800/70 bg-red-950/20 text-red-200 hover:bg-red-950/30"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        ))}
       </div>
+
+      {!collapsed && (
+        <>
+          {error && (
+            <div className="mt-3 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm text-red-200">
+              {error}
+            </div>
+          )}
+
+          {loading && <div className="mt-3 text-sm text-slate-400">Loading…</div>}
+
+          {!loading && !error && (!sorted || sorted.length === 0) && (
+            <div className="mt-3 text-sm text-slate-400">No interviews yet.</div>
+          )}
+
+          <div className="mt-4 space-y-3">
+            {sorted?.map((iv) => (
+              <div key={iv.id} className="rounded-lg border border-slate-800 bg-slate-950/30 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-100">
+                      {fmtDateTime(iv.scheduled_at)}{" "}
+                      <span className="text-slate-400 font-medium">
+                        ({(iv.status ?? "scheduled").toLowerCase()})
+                      </span>
+                    </div>
+                    <div className="mt-1 text-xs text-slate-400">
+                      {[iv.stage, iv.kind, iv.interviewer].filter(Boolean).join(" • ") || "—"}
+                    </div>
+                    {iv.location && <div className="mt-1 text-xs text-slate-500 break-words">{iv.location}</div>}
+                    {iv.notes && <div className="mt-2 text-sm text-slate-200 whitespace-pre-wrap break-words">{iv.notes}</div>}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => onDelete(iv.id)}
+                    className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition border border-red-800/70 bg-red-950/20 text-red-200 hover:bg-red-950/30"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       <Modal
         open={open}

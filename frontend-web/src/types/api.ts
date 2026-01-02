@@ -1,10 +1,36 @@
 export type MessageOut = { message: string };
 
 // -------- Auth --------
-export type RegisterIn = { email: string; password: string; name?: string | null };
-export type LoginIn = { email: string; password: string };
-export type LoginOut = { access_token: string; token_type?: string; must_change_password?: boolean };
-export type ResendVerificationIn = { email: string };
+export type CognitoTokens = {
+  access_token: string;
+  id_token?: string;
+  refresh_token?: string;
+  expires_in: number;
+  token_type: string;
+};
+
+export type CognitoAuthResponse = {
+  status: "OK" | "CHALLENGE";
+  message?: string | null;
+  next_step?: "MFA_SETUP" | "SOFTWARE_TOKEN_MFA" | "NEW_PASSWORD_REQUIRED" | "CUSTOM_CHALLENGE" | "UNKNOWN";
+  challenge_name?: string | null;
+  session?: string | null;
+  tokens?: CognitoTokens;
+};
+
+export type CognitoSignupIn = { email: string; password: string; name: string; turnstile_token: string };
+export type CognitoConfirmIn = { email: string; code: string };
+export type CognitoRefreshIn = { refresh_token: string };
+export type CognitoMessage = { status?: string; message?: string };
+export type CognitoChallengeRequest = {
+  email: string;
+  challenge_name: string;
+  session: string;
+  responses: Record<string, string>;
+};
+export type CognitoMfaSetupIn = { session: string; label?: string };
+export type CognitoMfaSetupOut = { secret_code: string; otpauth_uri?: string; session?: string | null };
+export type CognitoMfaVerifyIn = { email: string; session: string; code: string; friendly_name?: string };
 
 // -------- Users / Settings --------
 export type UserMeOut = {
@@ -12,10 +38,7 @@ export type UserMeOut = {
   email: string;
   name?: string | null;
   auto_refresh_seconds: number;
-  is_email_verified: boolean;
   created_at: string;
-  email_verified_at?: string | null;
-  must_change_password?: boolean;
 };
 
 export type UserSettingsOut = {
@@ -27,7 +50,6 @@ export type UserSettingsOut = {
 };
 export type UpdateSettingsIn = UserSettingsOut;
 export type ChangePasswordIn = { current_password: string; new_password: string };
-
 // -------- Jobs / Notes / Documents (minimal shapes used by UI) --------
 export type Job = {
   id: number;

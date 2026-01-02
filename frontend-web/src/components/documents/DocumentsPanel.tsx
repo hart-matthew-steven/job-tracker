@@ -12,6 +12,7 @@ import {
 import DocumentSection from "./DocumentSection";
 import DocRow from "./DocRow";
 import { useToast } from "../ui/toast";
+import CollapseToggle from "../ui/CollapseToggle";
 
 type DocType = { key: string; label: string; multiple: boolean };
 
@@ -42,9 +43,11 @@ function safeTime(value: string | null | undefined) {
 type Props = {
   jobId: number | null;
   onActivityChange?: (iso: string) => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 };
 
-export default function DocumentsPanel({ jobId, onActivityChange }: Props) {
+export default function DocumentsPanel({ jobId, onActivityChange, collapsed = false, onToggleCollapse }: Props) {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -295,33 +298,40 @@ export default function DocumentsPanel({ jobId, onActivityChange }: Props) {
 
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="text-xl font-semibold">Documents</div>
-        {busy && <div className="text-xs text-slate-400">Working…</div>}
-      </div>
-
-      {error && (
-        <div className="mt-3 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm text-red-200">
-          {error}
+        <div className="flex items-center gap-3">
+          {busy && <div className="text-xs text-slate-400">Working…</div>}
+          {onToggleCollapse && <CollapseToggle collapsed={collapsed} onToggle={onToggleCollapse} label="documents section" />}
         </div>
-      )}
-
-      <div className="mt-4 space-y-6">
-        {DOC_TYPES.map((t) => (
-          <DocumentSection
-            key={t.key}
-            type={t}
-            items={grouped[t.key] ?? []}
-            busy={busy}
-            activeDocId={activeDocId}
-            inputKey={inputKey}
-            onUpload={handleUpload}
-            onDownload={handleDownload}
-            onDelete={handleDelete}
-            DocRow={DocRow}
-          />
-        ))}
       </div>
+
+      {!collapsed && (
+        <>
+          {error && (
+            <div className="mt-3 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm text-red-200">
+              {error}
+            </div>
+          )}
+
+          <div className="mt-4 space-y-6">
+            {DOC_TYPES.map((t) => (
+              <DocumentSection
+                key={t.key}
+                type={t}
+                items={grouped[t.key] ?? []}
+                busy={busy}
+                activeDocId={activeDocId}
+                inputKey={inputKey}
+                onUpload={handleUpload}
+                onDownload={handleDownload}
+                onDelete={handleDelete}
+                DocRow={DocRow}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

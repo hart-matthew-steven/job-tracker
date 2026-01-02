@@ -10,7 +10,7 @@ This document describes the backend structure and conventions at a high level.
 - Persistence: PostgreSQL + SQLAlchemy
 - Background processing: AWS-managed (EventBridge, Lambda)
 - File scanning: AWS GuardDuty Malware Protection for S3
-- Authentication: JWT access tokens + HttpOnly refresh cookies, Argon2 password hashing, password rotation
+- Authentication: Cognito Option‑B (`/auth/cognito/*`) with Cloudflare Turnstile enforced on signup. Backend verifies Cognito access tokens on every request; access/id tokens live in memory + sessionStorage and refresh tokens live in sessionStorage only. No Job Tracker-specific JWT or refresh cookie remains.
 
 ### Database connectivity
 
@@ -30,8 +30,8 @@ This document describes the backend structure and conventions at a high level.
 
 ### Password policy
 
-- Configurable via `PASSWORD_MIN_LENGTH` (default 14) and `PASSWORD_MAX_AGE_DAYS` (default 90). Strength checks apply whenever passwords are set or changed; login never rejects existing weak passwords.
-- A dedicated `password_changed_at` timestamp on `users` tracks the last rotation. Auth responses (login/refresh/`GET /users/me`) include `must_change_password` when the age limit is exceeded so the frontend can gate access and force a rotation workflow.
+- Configurable via `PASSWORD_MIN_LENGTH` (default 14). Strength checks (mixed case, number, special, denylist, no email/name) apply whenever passwords are set.
+- Rotation is handled by Cognito; the legacy `password_changed_at`/`must_change_password` fields were removed during the cutover.
 
 ---
 
@@ -65,18 +65,9 @@ Typical layout:
 
 ---
 
-## Email delivery (configuration)
+## Email delivery
 
-The backend sends verification emails using the configured provider.
-
-- **`EMAIL_PROVIDER`**: defaults to `resend` when unset.
-  - Supported: `resend` (default), `ses`, `gmail`
-  - Legacy alias: `smtp` is treated as `gmail`
-- **`FROM_EMAIL`**: used only for `resend` and `ses` (do not use for `gmail`)
-- **`RESEND_API_KEY`**: required when using `resend`
-- **`AWS_REGION`**: used for AWS clients (including SES)
-
-See `backend/.env.example` for the full list of backend variable names.
+Cognito currently sends verification/reset emails via its default managed email service. FastAPI has no direct SMTP/SES/Resend integration; future chunks may reintroduce a custom sender once requirements are finalized.
 
 ---
 

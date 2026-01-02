@@ -15,23 +15,35 @@ This document describes how to run and work on the frontend locally.
 
 From the repo root:
 
-    cd frontend
-    npm install
-    npm run dev
+```bash
+cd frontend-web
+npm install
+VITE_API_BASE_URL=http://localhost:8000 \
+VITE_TURNSTILE_SITE_KEY=1x00000000000000000000AA \
+npm run dev
+```
 
-This starts the Vite development server.
+`VITE_API_BASE_URL` tells the SPA which backend to call. When pointing at ngrok or a staging URL, export that value before running `npm run dev`. Production builds get the value injected at build time via GitHub Actions—there is no `.env.production` checked into the repo.
+
+`VITE_TURNSTILE_SITE_KEY` configures the Cloudflare Turnstile widget rendered on `/register`. Use Cloudflare’s public test site key (`1x00000000000000000000AA`) for local dev unless you have provisioned a dedicated Turnstile site.
 
 ---
 
 ## Backend Connectivity
 
-- The frontend communicates with the backend via HTTP APIs.
-- In development, the backend typically runs locally.
-- If the backend is exposed via ngrok, the frontend should point to the ngrok URL.
+- All API calls go through `src/api.ts` (general backend routes) or `src/api/authCognito.ts` (Cognito Option-B flows).
+- In development the backend typically runs at `http://localhost:8000`. When using ngrok, set `VITE_API_BASE_URL` to the tunnel URL so cookies and redirects stay consistent.
+- The frontend never calls Cognito directly—the SPA talks only to `/auth/cognito/*` and receives Cognito tokens from our backend responses (the SPA stores them in memory + sessionStorage).
 
-Configuration options may include:
-- environment variables
-- a centralized API client configuration file
+### Auth & MFA flow (Chunk 7)
+
+1. `/register` → `POST /auth/cognito/signup` (payload includes `turnstile_token`)
+2. `/verify` → `POST /auth/cognito/confirm`
+3. `/login` → `POST /auth/cognito/login`
+   - `status=OK` → store the Job Tracker access token in sessionStorage and proceed
+   - `status=CHALLENGE` + `MFA_SETUP` → `/mfa/setup` → `/auth/cognito/mfa/setup` + `/auth/cognito/mfa/verify`
+   - `status=CHALLENGE` + `SOFTWARE_TOKEN_MFA` → `/mfa/code` → `/auth/cognito/challenge`
+4. `/auth/cognito/logout` is a best-effort endpoint; the SPA clears its stored Cognito tokens (memory + sessionStorage) through `AuthProvider.logout()`.
 
 ---
 
@@ -46,9 +58,9 @@ Configuration options may include:
 
 ## Debugging Tips
 
-- Use browser dev tools for network inspection
-- Confirm API base URL is correct
-- Watch for CORS issues when using ngrok
+- Use browser dev tools to confirm requests hit `/auth/cognito/*` and that responses include `status`/`next_step`.
+- If MFA screens loop, confirm the backend has valid `COGNITO_*` env vars and that the SPA is pointing at the same origin specified in `CORS_ORIGINS`.
+- When using ngrok, update both `VITE_API_BASE_URL` **and** backend CORS origins to include the ngrok HTTPS URL—otherwise refresh or challenge calls will fail silently.
 
 ---
 

@@ -1,14 +1,23 @@
 // src/auth/AuthProvider.tsx
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { getAccessToken, setAccessToken, logoutUser, subscribeToUnauthorizedLogout } from "../api";
+import { logoutUser, subscribeToUnauthorizedLogout } from "../api";
+import type { CognitoTokens } from "../types/api";
+import {
+    clearSession as clearStoredSession,
+    getSession as getStoredSession,
+    setSessionFromTokens,
+    subscribe as subscribeAuthSession,
+} from "./tokenManager";
 
 export type AuthContextValue = {
-    token: string | null;
+    accessToken: string | null;
+    idToken: string | null;
+    refreshToken: string | null;
     isAuthenticated: boolean;
     isReady: boolean;
 
-    setSession: (newToken: string | null) => void;
+    setSession: (tokens: CognitoTokens | null) => void;
     logout: () => Promise<void>;
 
     isAuthed: () => boolean;
@@ -35,7 +44,7 @@ function safeNext(nextRaw: string | undefined) {
 }
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
-    const [token, setToken] = useState<string | null>(() => getAccessToken());
+    const [session, setSessionState] = useState(() => getStoredSession());
     const [isReady, setIsReady] = useState(false);
 
     const markJustLoggedOut = useCallback(() => {
@@ -46,34 +55,35 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         }
     }, []);
 
-    // Hydrate token from localStorage on app start + keep tab state in sync
+    // Hydrate tokens on app start + keep tab state in sync
     useEffect(() => {
-        const sync = () => setToken(getAccessToken());
-        sync();
+        const syncSession = () => setSessionState(getStoredSession());
+        const unsubscribeSession = subscribeAuthSession(syncSession);
         const readyTimer = window.setTimeout(() => setIsReady(true), 0);
-        window.addEventListener("storage", sync);
         const unsubscribe = subscribeToUnauthorizedLogout(() => {
             markJustLoggedOut();
-            setAccessToken(null);
-            setToken(null);
+            clearStoredSession();
+            setSessionState(null);
         });
         return () => {
-            window.removeEventListener("storage", sync);
+            unsubscribeSession();
             unsubscribe();
             clearTimeout(readyTimer);
         };
     }, [markJustLoggedOut]);
 
-    function setSession(newToken: string | null) {
-        setAccessToken(newToken);
-        setToken(newToken);
+    function setSession(tokens: CognitoTokens | null) {
+        if (tokens) {
+            setSessionFromTokens(tokens);
+        } else {
+            clearStoredSession();
+        }
     }
 
-    // Phase 2: server logout (revokes refresh token cookie + clears local token in api.js)
     async function logout() {
         markJustLoggedOut();
-        setAccessToken(null);
-        setToken(null);
+        clearStoredSession();
+        setSessionState(null);
 
         try {
             await logoutUser();
@@ -83,7 +93,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     }
 
     function isAuthed() {
-        return !!token;
+        return !!session?.accessToken;
     }
 
     function requireAuthNavigate(nextRaw = "/") {
@@ -100,13 +110,13 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
 
         const headers = {
             ...(options.headers ?? {}),
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
         };
 
         const res = await fetch(`${baseUrl}${path}`, {
             ...options,
             headers,
-            credentials: "include",
+            credentials: "omit",
         });
 
         if (res.status === 401) {
@@ -124,8 +134,10 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     }
 
     const value: AuthContextValue = {
-        token,
-        isAuthenticated: !!token,
+        accessToken: session?.accessToken ?? null,
+        idToken: session?.idToken ?? null,
+        refreshToken: session?.refreshToken ?? null,
+        isAuthenticated: !!session?.accessToken,
         isReady,
 
         setSession,

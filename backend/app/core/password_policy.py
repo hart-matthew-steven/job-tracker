@@ -112,23 +112,3 @@ def ensure_strong_password(password: str, *, email: str | None = None, username:
             },
         )
 
-
-def password_is_expired(user: "User") -> bool:
-    max_age_days = int(getattr(settings, "PASSWORD_MAX_AGE_DAYS", 0) or 0)
-    if max_age_days <= 0:
-        return False
-
-    changed_at = getattr(user, "password_changed_at", None) or getattr(user, "created_at", None)
-    if not changed_at:
-        return False
-
-    if changed_at.tzinfo is None:
-        changed_at = changed_at.replace(tzinfo=timezone.utc)
-
-    deadline = changed_at + timedelta(days=max_age_days)
-    return datetime.now(timezone.utc) >= deadline
-
-
-def mark_password_changed(user: "User") -> None:
-    user.password_changed_at = datetime.now(timezone.utc)
-
