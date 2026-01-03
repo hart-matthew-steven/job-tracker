@@ -438,7 +438,10 @@ def confirm_verification_code(
     record.updated_at = now
     db.commit()
 
-    return CognitoMessage(status="OK", message="Email verified. You can continue using the app.")
+    return CognitoMessage(
+        status="OK",
+        message="Email verified. Sign in again to finish MFA setup before using the app.",
+    )
 
 
 @router.post("/refresh", response_model=CognitoAuthResponse)
