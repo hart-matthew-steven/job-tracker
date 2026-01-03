@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any
 import hashlib
+import base64
 
 import boto3
 from botocore.exceptions import ClientError
@@ -16,6 +18,23 @@ def _env(name: str) -> str:
     if v is None or not str(v).strip():
         raise RuntimeError(f"Missing env var: {name}")
     return str(v).strip()
+
+
+@lru_cache(maxsize=1)
+def _load_scan_secret() -> str:
+    arn = _env("DOC_SCAN_SHARED_SECRET_ARN")
+    client = boto3.client("secretsmanager")
+    resp = client.get_secret_value(SecretId=arn)
+    secret = resp.get("SecretString")
+    if not secret:
+        binary = resp.get("SecretBinary")
+        if binary:
+            if isinstance(binary, str):
+                binary = binary.encode("utf-8")
+            secret = base64.b64decode(binary).decode("utf-8")
+    if not secret:
+        raise RuntimeError("DOC_SCAN_SHARED_SECRET secret is empty")
+    return secret.strip()
 
 
 def _parse_document_id_from_key(key: str) -> int | None:
@@ -256,7 +275,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:  # noqa: ARG
     - DOC_SCAN_SHARED_SECRET
     """
     backend_base = _env("BACKEND_BASE_URL").rstrip("/")
-    secret = _env("DOC_SCAN_SHARED_SECRET")
+    secret = _load_scan_secret()
 
     detail = event.get("detail") if isinstance(event, dict) else None
     if not isinstance(detail, dict):
@@ -313,18 +332,6 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:  # noqa: ARG
         "provider": "guardduty",
         "occurred_at": datetime.now(timezone.utc).isoformat(),
     }
-
-    secret_sig = hashlib.sha256(secret.encode("utf-8")).hexdigest()[:10]
-    print(
-        json.dumps(
-            {
-                "msg": "scan_callback_debug",
-                "url": url,
-                "secret_len": len(secret),
-                "secret_sig": secret_sig,
-            }
-        )
-    )
 
     headers = {"X-Scan-Secret": secret, "Content-Type": "application/json"}
 
