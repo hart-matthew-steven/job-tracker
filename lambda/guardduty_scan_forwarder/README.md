@@ -13,7 +13,7 @@ It extracts `document_id` from the S3 key format:
 Do **not** commit secrets to git.
 
 - `BACKEND_BASE_URL`: e.g. `https://api.example.com`
-- `DOC_SCAN_SHARED_SECRET`: shared secret header value used to authenticate the callback
+- `DOC_SCAN_SHARED_SECRET_ARN`: ARN of the Secrets Manager secret that stores the shared secret value (this function retrieves the secret at runtime)
 
 ## Result mapping
 
@@ -33,8 +33,9 @@ This Lambda:
 - First tries to read `GuardDutyMalwareScanStatus` from the EventBridge event payload
 - If missing, calls S3 `GetObjectTagging` for `(bucket, key)` and reads the tag value
 
-Required IAM permission (scoped to bucket/prefix):
+Required IAM permissions (scope as tightly as possible):
 - `s3:GetObjectTagging` on `arn:aws:s3:::job-tracker-documents-0407/job-tracker/*`
+- `secretsmanager:GetSecretValue` on the `DOC_SCAN_SHARED_SECRET_ARN`
 
 ## Build + push to ECR (example)
 
