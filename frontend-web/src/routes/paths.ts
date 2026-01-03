@@ -3,6 +3,8 @@ export const ROUTES = {
   login: "/login",
   register: "/register",
   verify: "/verify",
+  mfaSetup: "/mfa/setup",
+  mfaChallenge: "/mfa/code",
 
   // App (protected)
   dashboard: "/",

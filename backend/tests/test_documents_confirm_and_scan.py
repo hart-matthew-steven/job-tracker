@@ -60,7 +60,7 @@ def test_document_scan_result_clean_allows_download(client):
     app_config.settings.DOC_SCAN_SHARED_SECRET = "scan_secret"
 
     res3 = client.post(
-        f"/jobs/{job['id']}/documents/scan-result",
+        f"/jobs/{job['id']}/documents/{doc['id']}/scan-result",
         headers={"x-scan-secret": "scan_secret"},
         json={"document_id": doc["id"], "result": "clean"},
     )
@@ -79,7 +79,7 @@ def test_document_scan_result_unauthorized(client):
     app_config.settings.DOC_SCAN_SHARED_SECRET = "scan_secret"
 
     res = client.post(
-        f"/jobs/{job['id']}/documents/scan-result",
+        f"/jobs/{job['id']}/documents/999/scan-result",
         headers={"x-scan-secret": "wrong"},
         json={"document_id": 999, "result": "clean"},
     )

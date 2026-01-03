@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-from app.services.email_verification import issue_email_verification_token
-from app.models.user import User
-
-
 def _create_job(client):
     res = client.post(
         "/jobs/",
@@ -22,9 +18,8 @@ def _assert_error_shape(res, *, error: str | None = None):
         assert data["error"] == error
 
 
-def test_error_shape_401_refresh_missing_cookie(client):
-    client.cookies.clear()
-    res = client.post("/auth/refresh")
+def test_error_shape_401_missing_token(anonymous_client):
+    res = anonymous_client.get("/jobs")
     assert res.status_code == 401
     _assert_error_shape(res, error="UNAUTHORIZED")
 
@@ -56,27 +51,5 @@ def test_error_shape_422_request_validation_error(client):
     assert isinstance(body["details"].get("errors"), list)
 
 
-def test_error_shape_403_login_unverified_email(client, db_session, monkeypatch):
-    # Avoid any real email delivery.
-    from app.routes import auth as auth_routes
-
-    monkeypatch.setattr(auth_routes, "send_email", lambda to_email, subject, body: "msg_test_123")
-
-    email = "unverified2@example.com"
-    password = "Password_12345"
-
-    res = client.post("/auth/register", json={"email": email, "password": password, "name": "New User"})
-    assert res.status_code == 200
-
-    res2 = client.post("/auth/login", json={"email": email, "password": password})
-    assert res2.status_code == 403
-    _assert_error_shape(res2, error="FORBIDDEN")
-
-    # Verify so this test doesn't interfere with later auth tests that might re-use email.
-    user = db_session.query(User).filter(User.email == email).first()
-    token = issue_email_verification_token(db_session, user)
-    db_session.commit()
-    res3 = client.get("/auth/verify", params={"token": token})
-    assert res3.status_code == 200
 
 

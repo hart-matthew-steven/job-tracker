@@ -3,10 +3,12 @@ import { useMemo, useState } from "react";
 import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
 import type { FormEvent } from "react";
 
-import { loginUser } from "../../api";
+import { cognitoLogin, sendEmailVerificationCode } from "../../api/authCognito";
 import { useAuth } from "../../auth/AuthProvider";
 import { useToast } from "../../components/ui/toast";
 import { ROUTES } from "../../routes/paths";
+import type { CognitoTokens } from "../../types/api";
+import { getCurrentUser } from "../../api";
 
 function safeNext(nextRaw: string | null) {
   const v = (nextRaw || "").trim();
@@ -30,29 +32,56 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  async function completeLogin(tokens: CognitoTokens | null | undefined) {
+    if (!tokens?.access_token) {
+      throw new Error("Login did not return an access token.");
+    }
+    setSession(tokens);
+    try {
+      const me = await getCurrentUser();
+      if (!me.is_email_verified) {
+        await sendEmailVerificationCode({ email: me.email });
+        const params = new URLSearchParams({ email: me.email, next });
+        nav(`${ROUTES.verify}?${params.toString()}`, { replace: true });
+        return;
+      }
+    } catch (err) {
+      console.error("Unable to fetch verification status:", err);
+    }
+    nav(next, { replace: true });
+  }
+
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
     setBusy(true);
 
     try {
-      const res = await loginUser({
-        email: email.trim(),
-        password,
-      });
+      const normalizedEmail = email.trim().toLowerCase();
+      const res = await cognitoLogin(normalizedEmail, password);
 
-      if (!res?.access_token) {
-        throw new Error("Login did not return an access token.");
+      if (res.status === "OK") {
+        await completeLogin(res.tokens);
+        return;
       }
 
-      // ✅ update auth state first, then navigate
-      setSession(res.access_token);
-      if (res.must_change_password) {
-        toast.info("Your password has expired. Please update it to continue.", "Login");
-        nav(ROUTES.changePassword, { replace: true });
-      } else {
-        nav(next, { replace: true });
+      if (res.status === "CHALLENGE") {
+        if (!res.session) {
+          throw new Error("Missing Cognito challenge session.");
+        }
+        const state = { email: normalizedEmail, session: res.session, next };
+        if (res.next_step === "MFA_SETUP") {
+          nav(ROUTES.mfaSetup, { state, replace: true });
+          return;
+        }
+        if (res.next_step === "SOFTWARE_TOKEN_MFA") {
+          nav(ROUTES.mfaChallenge, { state, replace: true });
+          return;
+        }
+        throw new Error("Unsupported Cognito challenge. Please try again.");
       }
+
+      throw new Error("Login failed.");
     } catch (err) {
       const errObj = err as { message?: string } | null;
       const msg = errObj?.message ?? "Login failed";
@@ -123,12 +152,15 @@ export default function LoginPage() {
         </NavLink>
       </div>
 
-      <div className="text-xs text-slate-500">
-        Already registered but not verified? Check your inbox for the verification link or{" "}
-        <NavLink to={registerLink} className="text-blue-700 hover:text-blue-800 font-semibold dark:text-blue-300 dark:hover:text-blue-200">
-          resend it
-        </NavLink>{" "}
-        from the register screen.
+      <div className="text-xs text-slate-500 dark:text-slate-400">
+        Already registered but not confirmed? Enter the code from your email on the{" "}
+        <NavLink
+          to={`/verify${next ? `?next=${encodeURIComponent(next)}` : ""}`}
+          className="text-blue-700 hover:text-blue-800 font-semibold dark:text-blue-300 dark:hover:text-blue-200"
+        >
+          confirmation screen
+        </NavLink>
+        .
       </div>
     </div>
   );

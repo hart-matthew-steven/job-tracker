@@ -1,8 +1,8 @@
 # GuardDuty Scan Forwarder Lambda (EventBridge → FastAPI callback)
 
-This Lambda receives **EventBridge** events from **Amazon GuardDuty Malware Protection for S3** and forwards the scan result to the backend internal callback endpoint:
+This Lambda receives **EventBridge** events from **Amazon GuardDuty Malware Protection for S3** and forwards the scan result to the backend document callback endpoint:
 
-`POST /internal/documents/{document_id}/scan-result`
+`POST /jobs/{job_id}/documents/{document_id}/scan-result`
 
 It extracts `document_id` from the S3 key format:
 

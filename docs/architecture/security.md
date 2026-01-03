@@ -34,6 +34,30 @@ Non-goals:
 - **No secret material in git:** secrets come from environment or a secret manager
 - **Auditability:** key actions have traceable logs/metadata (without storing secrets)
 
+## Bot Protection (Signup Abuse)
+
+### Threat model
+
+- Automated signup storms can burn through Cognito cost buckets (email/SMS/MFA) and create fake accounts that later abuse AI features or document storage.
+- Frontend-only CAPTCHAs are insufficient; tokens must be verified server-side and the system must fail closed when configuration drifts.
+
+### Decision: Cloudflare Turnstile (Chunk 8)
+
+- **Managed/invisible UX:** Turnstile avoids the reCAPTCHA “pick all bicycles” flow and adapts friction based on risk.
+- **Privacy posture:** No Google account fingerprinting; helps with compliance conversations.
+- **Simple API:** Single POST to `/siteverify`, short timeouts, and deterministic error codes.
+- **Fail closed:** Missing keys or verification errors block signup (HTTP 503/400) instead of bypassing CAPTCHA.
+
+### Implementation
+
+- Frontend renders an invisible Turnstile widget on `/register`. Tokens are single-use; failures reset the widget automatically.
+- Backend module `app/services/turnstile.py` posts tokens to Cloudflare with `secret`, `response`, and `remoteip` (if available). Network errors raise `TurnstileVerificationError`, which maps to user-safe error messages (no vendor leakage).
+- Env vars:
+  - Backend: `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`. Missing values raise HTTP 503 to keep signup disabled until configured.
+  - Frontend: `VITE_TURNSTILE_SITE_KEY` (or `window.__TURNSTILE_SITE_KEY__` while prototyping).
+- Only `/auth/cognito/signup` is gated. Login, MFA, and refresh flows remain unchanged to keep the normal user journey smooth.
+- Monitoring: alert on `/auth/cognito/signup` 4xx/5xx spikes to catch CAPTCHA outages or active abuse quickly.
+
 ---
 
 ## Ingress & Exposure
@@ -159,7 +183,7 @@ No secrets are committed to git; they are configured via environment variables.
 Design goals:
 - UI and API enforce access controls consistently
 - Protect any endpoints that mutate state
-- Avoid “dev-only backdoors” that can drift into production
+- Avoid "dev-only backdoors" that can drift into production
 
 If authentication exists:
 - Prefer short-lived access tokens
@@ -192,6 +216,58 @@ Rules:
   - high-level action and result
   - scan state transitions (PENDING → CLEAN/REJECTED)
 - Store run outputs under `logs/` (ignored by default in git)
+
+---
+
+## Cognito Authentication Migration Plan
+
+### Objectives
+Transition from the legacy custom-auth implementation to Amazon Cognito while retaining a custom UI (no Hosted UI redirects) and preparing for future MFA + native iOS flows. Chunk 7 completes this transition; Cognito access tokens are now the only accepted credentials.
+
+### Resources already provisioned
+- User Pool (production tenant) with a client that **does not** use a client secret (suitable for SPA/native clients).
+- Custom Cognito domain: `auth.jobapptracker.dev`.
+- Callback URLs: `https://jobapptracker.dev` and `https://www.jobapptracker.dev`.
+- Logout URLs: `https://jobapptracker.dev` and `https://www.jobapptracker.dev`.
+
+### Migration approach
+Work is delivered as incremental chunks:
+
+- **Chunk 0** (completed): documentation + configuration placeholders only — no runtime behavior changes.
+- **Chunk 1** (completed): backend read-only Cognito JWT verification.
+  - Introduced the JWKS cache and `/auth/debug/token-info`. Later chunks removed the old toggle; the backend now always runs in Cognito mode.
+- **Chunk 2** (completed): unified identity model + request context (`Identity` dataclass, `/auth/debug/identity`). No longer needs to reason about multiple providers now that only Cognito remains.
+  - **Why identity normalization first?** Future features (AI usage tracking, billing, roles) need a stable user reference. By normalizing identity early, downstream code never inspects raw tokens — it just consumes `Identity`.
+- **Chunk 3** (retired): original profile-completion gate was removed in Chunk 5 so Cognito can remain the source of truth without an intermediate table.
+- **Chunk 4** (completed): backend authorization + user auto-provisioning.
+  - Cognito became the primary auth source; today only Cognito tokens are accepted.
+  - User auto-provisioning (JIT): On first Cognito-authenticated request, a User record is auto-created with `cognito_sub`, `email`, `name`, `auth_provider="cognito"`, `is_email_verified=true`.
+  - User model updated: Added `cognito_sub` (unique, nullable) and `auth_provider`; `password_hash` now nullable.
+  - Migration: `g8b9c0d1e2f3_add_cognito_fields_to_users.py`.
+  - Authorization: All protected routes use DB user ID (mapped from `cognito_sub` for Cognito users).
+  - **Why Cognito-first?** Consistent identity across clients (web, iOS), AI billing attribution, and future MFA enforcement.
+- **Chunk 5** (completed): Remove profile gate + add Cognito Option B (BFF):
+  - Dropped `user_profiles` table and `users.profile_completed_at`; enforced `users.name` NOT NULL so name is captured at signup.
+  - New BFF router (`app/routes/auth_cognito.py`) exposes signup/confirm/login/challenge/MFA endpoints; frontend never talks to Cognito directly.
+  - Backend uses boto3 `cognito-idp` client (`app/services/cognito_client.py`) and (historically) kept issuing the Job Tracker refresh cookie + access token; Chunk 7 later removed the custom tokens so only Cognito credentials remain.
+  - MFA (TOTP) handled fully in backend: associate → verify → respond-to-challenge, returning `otpauth://` URIs for authenticator apps.
+  - Cognito tokens remain backend-only; the SPA only receives Job Tracker tokens/cookies.
+- **Chunk 6** (completed): hardened Cognito challenge handling for required TOTP (`MFA_SETUP`, `SOFTWARE_TOKEN_MFA`, deterministic `next_step` contract).
+- **Chunk 7** (completed): production cutover.
+  - Backend stops minting legacy JWTs/refresh cookies and accepts only Cognito access tokens, passing them directly to the SPA.
+  - `/auth/cognito/refresh` proxies `REFRESH_TOKEN_AUTH`.
+  - SPA stores tokens in memory + sessionStorage; refresh tokens never touch cookies/localStorage.
+  - Legacy tables (`refresh_tokens`, `email_verification_tokens`, password metadata) removed via `cognito_cutover_cleanup`.
+  - Rate limiting + logging tightened around `/auth/cognito/*`.
+- **Chunk 8** (completed): Cloudflare Turnstile bot protection on signup (invisible/managed widget + backend verification).
+- **Chunk 10** (completed): Added Pre Sign-up Lambda that auto-confirms users and disables Cognito email verification so signup doesn’t depend on Cognito emails during the migration.
+- **Chunk 11** (completed): App-enforced email verification (hashed codes, TTL, cooldown, Resend delivery, Cognito `AdminUpdateUserAttributes` sync) with public `/auth/cognito/verification/{send,confirm}` endpoints so users can verify before their first login; middleware still blocks unverified authenticated requests with `403 EMAIL_NOT_VERIFIED`.
+- Future work: passkeys, native iOS auth screens, AI usage/billing gates.
+
+### Guardrails
+- No `.env` secrets checked into git; Cognito env vars are documented via placeholders only.
+- Backend/Frontend behavior must remain stable between chunks until each stage is explicitly toggled on.
+- Observability will be updated alongside the chunks to capture Cognito-related errors without leaking sensitive data.
 
 ---
 

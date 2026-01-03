@@ -6,9 +6,10 @@ from fastapi.responses import JSONResponse
 
 from slowapi.errors import RateLimitExceeded
 
-from app.core.config import settings, require_jwt_secret
+from app.core.config import settings
 from app.core.rate_limit import limiter
-from app.routes.auth import router as auth_router
+from app.middleware.identity import register_identity_middleware
+from app.routes.auth_cognito import router as auth_cognito_router
 from app.routes.job_applications import router as jobs_router
 from app.routes.notes import router as notes_router
 from app.routes.documents import router as documents_router
@@ -44,15 +45,7 @@ async def startup_event() -> None:
     try:
         logger.info("Starting Job Tracker API (ENV=%s)", settings.ENV)
 
-        # Fail fast but log clearly if misconfigured
-        require_jwt_secret()
-
-        logger.info(
-            "Startup config: EMAIL_ENABLED=%s provider=%s GUARD_DUTY_ENABLED=%s",
-            settings.EMAIL_ENABLED,
-            settings.EMAIL_PROVIDER,
-            settings.GUARD_DUTY_ENABLED,
-        )
+        logger.info("Startup config: GUARD_DUTY_ENABLED=%s", settings.GUARD_DUTY_ENABLED)
     except Exception:
         logger.exception("Startup failed")
         raise
@@ -138,11 +131,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+register_identity_middleware(app)
 
 # -------------------------------------------------------------------
 # Routers
 # -------------------------------------------------------------------
-app.include_router(auth_router)
+app.include_router(auth_cognito_router)
 app.include_router(jobs_router)
 app.include_router(notes_router)
 app.include_router(documents_router)

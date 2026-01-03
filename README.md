@@ -146,28 +146,6 @@ Backend-specific documentation (if present) lives under:
 
      Skip this when you start from a fresh volume—the init script already grants the rights.
 
-  5. **Verify a user when email delivery is disabled locally:**
-
-     ```bash
-     docker compose exec backend python - <<'PY'
-from app.core.database import SessionLocal
-from app.models.user import User
-from app.services.email_verification import issue_email_verification_token
-from app.core.config import settings
-
-email = "<EMAIL>".strip().lower()
-with SessionLocal() as session:
-    user = session.query(User).filter(User.email == email).first()
-    if not user:
-        raise SystemExit(f"No user found for {email}")
-    token = issue_email_verification_token(session, user)
-    session.commit()
-    print(f"{settings.FRONTEND_BASE_URL}/verify?token={token}&email={email}")
-PY
-     ```
-
-     Copy the printed URL into your browser to mark the account verified. Afterwards you can log in normally.
-
 ### Production deployment (AWS App Runner)
 
 - The backend is deployed to **AWS App Runner** behind `https://api.jobapptracker.dev`.
@@ -192,6 +170,139 @@ docker buildx build \
 ```
 
 After the image is pushed, point the App Runner service at the new ECR tag (or update the service via IaC/console). App Runner pulls the image, injects environment variables from Secrets Manager, and exposes the service at the subdomain above.
+
+## Authentication (Cognito – Production Cutover)
+
+### Architecture overview
+
+- The SPA talks **only** to our backend. `/auth/cognito/*` routes orchestrate Cognito SignUp / Confirm / Login / MFA / Refresh flows using the Cognito Identity Provider API (AuthFlow = `USER_PASSWORD_AUTH`, `SOFTWARE_TOKEN_MFA`, `REFRESH_TOKEN_AUTH`).
+- Successful authentication returns the raw Cognito tokens (`access_token`, `id_token`, `refresh_token`, `expires_in`, `token_type`). No legacy Job Tracker JWTs or refresh cookies are minted.
+- The backend enforces Cognito on every request:
+  - Bearer tokens must be Cognito **access tokens** (`token_use == "access"`).
+  - Signatures are validated via the User Pool JWKS with caching + rotation handling.
+  - `sub` → JIT user provisioning keeps the relational data model in sync.
+- Token refresh is available via `POST /auth/cognito/refresh` (Cognito `REFRESH_TOKEN_AUTH`). The frontend refreshes proactively ~60 seconds before expiry and deduplicates concurrent refresh calls.
+- MFA is required (`SOFTWARE_TOKEN_MFA`). First login triggers `/auth/cognito/mfa/setup`; subsequent logins collect the 6-digit TOTP via `/auth/cognito/challenge`.
+
+### Migration notes
+
+- Legacy custom auth endpoints (`/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/verify`, `/auth/resend-verification`) and the JWT/refresh-cookie code path have been removed.
+- User schema cleanup (`cognito_cutover_cleanup` migration) drops `password_hash`, `password_changed_at`, `token_version`, `is_email_verified`, `email_verified_at`, `refresh_tokens`, and `email_verification_tokens`. `cognito_sub` is now `NOT NULL` + unique.
+- `.env.example` now only lists Cognito + core infrastructure variables.
+- Frontend auth state lives in memory + `sessionStorage` (access/id tokens) with the refresh token kept in session storage only. Tabs stay in sync via a storage broadcast channel; no data is written to `localStorage`.
+- `tokenManager.ts` centralizes persistence + refresh; API helpers automatically refresh once on 401 before logging the user out.
+
+### Security considerations
+
+- **Token storage**: access/id tokens remain in memory + `sessionStorage`. Refresh tokens are stored in `sessionStorage` only (never cookies). Documentation recommends CSP (`default-src 'self'; script-src 'self' 'strict-dynamic' ...`) and dependency hygiene to mitigate XSS.
+- **Authorization**: backend rejects any Bearer token that is not a Cognito access token signed with the expected key + `client_id`. Unknown `token_use` values are denied.
+- **Logging**: no access/refresh/id token values are logged. Structured logs record only result codes (OK/CHALLENGE/FAIL) and anonymized Cognito subjects.
+- **Rate limiting**: all `/auth/cognito/*` routes are decorated via SlowAPI. Enable `ENABLE_RATE_LIMITING=true` in prod and back the limiter with Redis/Elasticache.
+- **CSRF**: there are no auth cookies. All requests are Bearer tokens via `Authorization` headers, which are not sent cross-site by browsers unless explicitly added.
+- **MFA**: required for every user. QR secrets are shown once and never logged/persisted server-side. Existing devices can re-enroll via `/auth/cognito/mfa/setup` with an access token if needed.
+- **CORS**: allow only the exact SPA origins in production (e.g., `https://jobapptracker.dev`). Local dev defaults (`http://localhost:5173`) are appended automatically when `ENV=dev`.
+
+## Bot Protection (Cloudflare Turnstile)
+
+**Why:** Automated signup storms burn Cognito quota (email/SMS/MFA) and can be used to stage AI abuse. Cloudflare Turnstile gives us a privacy-friendly CAPTCHA that we can verify server-side without degrading normal auth UX.
+
+- `/auth/cognito/signup` requires a Turnstile token. Missing/invalid tokens return HTTP 400 “CAPTCHA verification failed”.
+- Backend verification posts to `https://challenges.cloudflare.com/turnstile/v0/siteverify` (short timeout, no token logging). Missing configuration is fail-closed (HTTP 503 “Signup is temporarily unavailable”).
+- CAPTCHA is enforced **only** on signup; login, confirmation, MFA, refresh, etc. remain unchanged.
+- Env vars:
+  - Backend (`.env.example`): `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`.
+  - Frontend: `VITE_TURNSTILE_SITE_KEY` (or `window.__TURNSTILE_SITE_KEY__` while prototyping).
+- Use Cloudflare’s public test keys for local dev (<https://developers.cloudflare.com/turnstile/get-started/>). Monitoring should alert on signup 4xx/5xx spikes in case CAPTCHA starts failing or abuse ramps up.
+
+### Local development flow
+
+1. Configure Cognito variables once (User Pool + App Client must already exist):
+   ```bash
+   export COGNITO_REGION=us-east-1
+   export COGNITO_USER_POOL_ID=<your-pool-id>
+   export COGNITO_APP_CLIENT_ID=<your-client-id>
+   export TURNSTILE_SITE_KEY=<dev-turnstile-site-key>
+   export TURNSTILE_SECRET_KEY=<dev-turnstile-secret-key>
+   ```
+2. Start the backend:
+   ```bash
+   cd backend
+   ./venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   ```
+3. Start the frontend (the API base is the FastAPI URL):
+   ```bash
+   cd frontend-web
+   export VITE_API_BASE_URL=http://localhost:8000
+   export VITE_TURNSTILE_SITE_KEY=$TURNSTILE_SITE_KEY
+   npm run dev
+   ```
+4. End-to-end flow:
+   1. **Signup** – `/auth/cognito/signup` (name, email, strong password, Turnstile token).
+   2. **Confirm** – `/auth/cognito/confirm` with the verification code Cognito emails you.
+   3. **Login / MFA setup** – `/auth/cognito/login` → `/auth/cognito/mfa/setup` → `/auth/cognito/mfa/verify`.
+   4. **Subsequent login** – `/auth/cognito/login` + `/auth/cognito/challenge` (SOFTWARE_TOKEN_MFA).
+   5. **API calls** – SPA automatically attaches the Cognito access token to every request.
+
+## Cognito Pre Sign-up Lambda
+
+- Folder: `lambda/cognito_pre_signup/`
+- Purpose: attached to the Cognito **Pre Sign-up** trigger so Cognito auto-confirms new users and skips its built-in verification emails. This keeps email ownership on our side for future Resend-based flows.
+- Behavior: sets `autoConfirmUser=true` and `autoVerifyEmail=false` for supported trigger sources (`PreSignUp_SignUp`, `PreSignUp_AdminCreateUser`) and logs the trigger.
+- No network calls, secrets, or external services. See the lambda README for build/push instructions and attach steps.
+
+## Email verification (app-enforced)
+
+- Cognito accounts are auto-confirmed, but the backend blocks all protected APIs with `403 EMAIL_NOT_VERIFIED` while `users.is_email_verified = false`.
+- Signup automatically triggers the first verification email, so the `/verify` screen shows “code sent” and honors the resend cooldown before re-hitting the backend.
+- Endpoints:
+  - `POST /auth/cognito/verification/send` → throttled, public endpoint; generates a 6-digit code (hash + TTL) and emails it via Resend.
+  - `POST /auth/cognito/verification/confirm` → validates the code, marks the DB record verified, and calls Cognito `AdminUpdateUserAttributes` with `Username=cognito_sub` / `email_verified=true`.
+- Config knobs (see `.env.example`): `EMAIL_VERIFICATION_ENABLED`, `EMAIL_VERIFICATION_CODE_TTL_SECONDS`, `EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS`, `EMAIL_VERIFICATION_MAX_ATTEMPTS`, `RESEND_FROM_EMAIL`.
+- Docs: `docs/auth-email-verification.md` (flow details, security notes, testing steps).
+
+## Email Verification (App-enforced)
+
+- Why: Cognito no longer sends confirmation emails (Pre Sign-up Lambda auto-confirms), but we still need trusted verification for AI billing and iOS parity. The app now owns verification end-to-end.
+- Backend:
+  - Config (`.env.example`): `EMAIL_VERIFICATION_ENABLED`, `EMAIL_VERIFICATION_CODE_TTL_SECONDS`, `EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS`, `EMAIL_VERIFICATION_MAX_ATTEMPTS`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `FRONTEND_BASE_URL`.
+  - Table `email_verification_codes` stores salted+hashed codes, TTL, attempts, resend cooldown.
+  - Endpoints:
+    - `POST /auth/cognito/verification/send` (public but rate limited) – generates a 6-digit code, stores hash, sends via Resend.
+    - `POST /auth/cognito/verification/confirm` – validates code, marks `users.is_email_verified=true`, syncs `email_verified=true` back to Cognito using `Username=cognito_sub`.
+  - Middleware blocks all other APIs with `403 EMAIL_NOT_VERIFIED` until the DB flag is true (only verification endpoints, logout, and `GET /users/me` stay open).
+- Frontend:
+  - Login fetches `/users/me`; if unverified it automatically requests a code and routes to `/verify`.
+  - `/verify` screen allows resend (default 60s cooldown) and confirmation.
+  - Any 403 EMAIL_NOT_VERIFIED automatically redirects back to `/verify`.
+- Resend: Uses the official Python SDK; no raw codes logged. Emails are short, code-only, and mention the 15-minute expiry.
+
+### Refresh flow testing
+
+The login response includes `refresh_token`. To test refresh manually:
+
+```bash
+REFRESH="copy-from-login-response"
+curl -s -X POST http://localhost:8000/auth/cognito/refresh \
+  -H "Content-Type: application/json" \
+  -d "{\"refresh_token\":\"$REFRESH\"}"
+```
+
+You’ll receive a new `access_token`/`id_token`. The SPA’s `tokenManager` does the same automatically when the access token is about to expire; you can watch the network tab for `/auth/cognito/refresh` to verify single-flight behaviour.
+
+### Production readiness checklist
+
+- [ ] `COGNITO_REGION`, `COGNITO_USER_POOL_ID`, `COGNITO_APP_CLIENT_ID` present in App Runner/Secrets Manager.
+- [ ] CORS origins limited to `https://jobapptracker.dev` + `https://www.jobapptracker.dev`.
+- [ ] `ENABLE_RATE_LIMITING=true` with SlowAPI backed by Redis/Elasticache.
+- [ ] CloudFront (or ALB) configured with CSP/HSTS (`strict-transport-security: max-age=63072000; includeSubDomains; preload`).
+- [ ] Cognito App Client configured with `USER_PASSWORD_AUTH`, `REFRESH_TOKEN_AUTH`, and MFA = SOFTWARE_TOKEN_MFA (required).
+- [ ] Frontend built with `VITE_API_BASE_URL=https://api.jobapptracker.dev`.
+- [ ] Monitoring/alerting wired for `/auth/cognito/*` 4xx/5xx spikes and limiter throttling.
+
+### What's next
+
+- Passkeys + native iOS flows (future chunk)
+- AI usage/billing gates (future chunk)
 
 ### CI/CD pipelines
 
@@ -301,31 +412,16 @@ This repo includes a generated `backend/.env.example` (**names only**, no values
 
 ### Optional integrations
 
-- `EMAIL_ENABLED` (default `false`): enable outbound email delivery. When disabled, the backend no-ops and logs instead of calling providers. When enabled, configure `EMAIL_PROVIDER` + required credentials.
 - `GUARD_DUTY_ENABLED` (default `false`): enable AWS GuardDuty malware callbacks. When disabled, the callback endpoints no-op so local dev can run without GuardDuty or secrets.
 
-### Password policy & rotation
+### Password policy
 
-- Defaults: `PASSWORD_MIN_LENGTH=14`, `PASSWORD_MAX_AGE_DAYS=90`.
-- Strength checks (min length, mixed case, number, special char, denylist, no email/name inclusion) apply whenever a password is set or changed (registration, change password, reset flows). Existing stored passwords continue to work until rotated.
-- Rotation uses `password_changed_at` with the configured `PASSWORD_MAX_AGE_DAYS`. Logins succeeding with expired passwords still receive tokens, but every auth response (login/refresh/`GET /users/me`) includes `must_change_password: true` so the frontend can block access and redirect to the Change Password screen.
-- Configure the policy via the env vars above; the backend is the source of truth, and the frontend mirrors the rules for UX-only validation.
+- Minimum length: `PASSWORD_MIN_LENGTH=14` by default.
+- Strength checks (mixed case, number, special char, denylist, no email/name inclusion) run whenever a password is set/changed (e.g., Cognito signup helper).
+- Rotation-specific fields (`password_changed_at`, `PASSWORD_MAX_AGE_DAYS`, `must_change_password`) were removed once Cognito became the sole auth provider; future rotation is governed by Cognito policies.
+- The backend is the source of truth; the frontend mirrors the rules for UX-only validation.
 
-### Email providers
-
-`EMAIL_PROVIDER` controls how verification emails are sent:
-
-- **`resend` (default)**: Resend API
-  - Requires: `FROM_EMAIL`, `RESEND_API_KEY`
-- **`ses`**: AWS SES via `boto3`
-  - Requires: `AWS_REGION`, `FROM_EMAIL`
-- **`gmail`**: SMTP (preserves `SMTP_FROM_EMAIL` as the From address)
-  - Requires: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`
-- **Legacy alias**: `smtp` is treated as `gmail`
-
-Notes:
-- `FROM_EMAIL` is used **only** for `ses` and `resend`.
-- `AWS_REGION` is used for AWS clients (including SES).
+- Email verification is enforced by the app: after signup we route users to `/verify` to request/confirm a 6-digit code via Resend (`/auth/cognito/verification/send` + `/auth/cognito/verification/confirm`). If someone tries to log in before verifying, every protected API still returns `403 EMAIL_NOT_VERIFIED` and the UI redirects back to `/verify`. Once verified, the backend marks `users.is_email_verified = true` and syncs `email_verified=true` to Cognito via `AdminUpdateUserAttributes` so native clients stay in sync. Settings + flow docs live in `docs/auth-email-verification.md`.
 
 ## Design Principles
 

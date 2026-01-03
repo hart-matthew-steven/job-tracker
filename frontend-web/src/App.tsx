@@ -1,10 +1,12 @@
 // src/App.tsx
-import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate, useNavigate } from "react-router-dom";
+import { useEffect } from "react";
 
 import DashboardPage from "./pages/DashboardPage";
 import JobsPage from "./pages/JobsPage";
 
 import { useAuth } from "./auth/AuthProvider";
+import { subscribeToEmailVerificationRequired } from "./api";
 import RequireAuth from "./auth/RequireAuth";
 
 import LoginPage from "./pages/auth/LoginPage";
@@ -12,10 +14,24 @@ import RegisterPage from "./pages/auth/RegisterPage";
 import VerifyEmailPage from "./pages/auth/VerifyEmailPage";
 import AuthShellLayout from "./pages/auth/AuthShellLayout";
 import RedirectIfAuthed from "./pages/auth/RedirectIfAuthed";
+import MfaSetupPage from "./pages/auth/MfaSetupPage";
+import MfaChallengePage from "./pages/auth/MfaChallengePage";
 
 import AppShell from "./components/layout/AppShell";
 import { ChangePasswordPage, ProfilePage, SettingsPage } from "./pages/account";
 import { ROUTES } from "./routes/paths";
+
+function EmailVerificationListener() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    return subscribeToEmailVerificationRequired((info) => {
+      const params = new URLSearchParams();
+      if (info?.email) params.set("email", info.email);
+      navigate(`/verify?${params.toString()}`, { replace: false });
+    });
+  }, [navigate]);
+  return null;
+}
 
 export default function App() {
   const { isReady, logout } = useAuth();
@@ -30,6 +46,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <EmailVerificationListener />
       <Routes>
         {/* Auth routes */}
         <Route
@@ -41,6 +58,11 @@ export default function App() {
         >
           <Route path={ROUTES.login} element={<LoginPage />} />
           <Route path={ROUTES.register} element={<RegisterPage />} />
+          <Route path={ROUTES.mfaSetup} element={<MfaSetupPage />} />
+          <Route path={ROUTES.mfaChallenge} element={<MfaChallengePage />} />
+        </Route>
+
+        <Route element={<AuthShellLayout />}>
           <Route path={ROUTES.verify} element={<VerifyEmailPage />} />
         </Route>
 

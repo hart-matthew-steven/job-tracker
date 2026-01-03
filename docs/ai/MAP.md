@@ -8,6 +8,7 @@ Update it whenever key entry points or folder structure changes.
 - Entry: `frontend-web/src/main.tsx`
 - App routes: `frontend-web/src/App.tsx`
 - API client: `frontend-web/src/api.ts`
+- Cognito auth client + flow: `frontend-web/src/api/authCognito.ts`, `frontend-web/src/pages/auth/{RegisterPage,VerifyEmailPage,LoginPage,MfaSetupPage,MfaChallengePage}.tsx`
 - Routes constants: `frontend-web/src/routes/paths.ts`
 - Pages:
   - Auth: `frontend-web/src/pages/auth/*`
@@ -28,16 +29,31 @@ Update it whenever key entry points or folder structure changes.
 - Core (auth/config/db): `backend/app/core/` (expected)
   - Password policy enforcement helpers: `backend/app/core/password_policy.py`
   - DB config exposes separate runtime vs migrator credentials (`DB_APP_*`, `DB_MIGRATOR_*`) via `settings.database_url` / `settings.migrations_database_url`
+- Auth (Cognito migration): `backend/app/auth/`
+  - Identity model: `backend/app/auth/identity.py` (canonical `Identity` dataclass)
+  - Cognito JWT verifier: `backend/app/auth/cognito.py`
+  - User model: `backend/app/models/user.py` (includes `cognito_sub`, `auth_provider`, `name` NOT NULL)
+  - User service (JIT provisioning + name normalization): `backend/app/services/users.py`
+  - BFF router: `backend/app/routes/auth_cognito.py` (signup/confirm/login/challenge/MFA/logout)
+  - Cognito API helper: `backend/app/services/cognito_client.py`
+  - Debug endpoints: `/auth/debug/token-info`, `/auth/debug/identity` (disabled by default)
+  - Auth dependencies: `backend/app/dependencies/auth.py` (enforces Cognito-authenticated users)
 - Models: `backend/app/models/` (expected)
 - Schemas: `backend/app/schemas/` (expected)
 - Backend tests: `backend/tests/` (pytest)
 - Backend env var reference: `backend/.env.example` (generated, names only)
-- Deployment: README “Production deployment (AWS App Runner)” section documents the ECR/App Runner flow (buildx `linux/amd64`, Secrets Manager env injection, `api.jobapptracker.dev` endpoint).
+- Deployment: README "Production deployment (AWS App Runner)" section documents the ECR/App Runner flow (buildx `linux/amd64`, Secrets Manager env injection, `api.jobapptracker.dev` endpoint).
 
 ## Architecture Docs
 - Overview: `docs/architecture/overview.md`
 - Data flow: `docs/architecture/data-flow.md`
 - Security: `docs/architecture/security.md`
+- Cognito Option B (BFF): `docs/architecture/cognito-option-b.md`
+- Pre sign-up Lambda: `docs/auth-cognito-pre-signup.md`
+
+## Lambdas
+- GuardDuty forwarding Lambda: `lambda/guardduty_scan_forwarder/`
+- Cognito Pre Sign-up Lambda: `lambda/cognito_pre_signup/`
 
 ## AI Docs
 - Memory: `docs/ai/MEMORY.md`

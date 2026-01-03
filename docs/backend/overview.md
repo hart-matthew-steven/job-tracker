@@ -10,7 +10,7 @@ This document describes the backend structure and conventions at a high level.
 - Persistence: PostgreSQL + SQLAlchemy
 - Background processing: AWS-managed (EventBridge, Lambda)
 - File scanning: AWS GuardDuty Malware Protection for S3
-- Authentication: JWT access tokens + HttpOnly refresh cookies, Argon2 password hashing, password rotation
+- Authentication: Cognito Option‑B (`/auth/cognito/*`) with Cloudflare Turnstile enforced on signup. Backend verifies Cognito access tokens on every request; access/id tokens live in memory + sessionStorage and refresh tokens live in sessionStorage only. No Job Tracker-specific JWT or refresh cookie remains.
 
 ### Database connectivity
 
@@ -30,8 +30,8 @@ This document describes the backend structure and conventions at a high level.
 
 ### Password policy
 
-- Configurable via `PASSWORD_MIN_LENGTH` (default 14) and `PASSWORD_MAX_AGE_DAYS` (default 90). Strength checks apply whenever passwords are set or changed; login never rejects existing weak passwords.
-- A dedicated `password_changed_at` timestamp on `users` tracks the last rotation. Auth responses (login/refresh/`GET /users/me`) include `must_change_password` when the age limit is exceeded so the frontend can gate access and force a rotation workflow.
+- Configurable via `PASSWORD_MIN_LENGTH` (default 14). Strength checks (mixed case, number, special, denylist, no email/name) apply whenever passwords are set.
+- Rotation is handled by Cognito; the legacy `password_changed_at`/`must_change_password` fields were removed during the cutover.
 
 ---
 
@@ -65,18 +65,15 @@ Typical layout:
 
 ---
 
-## Email delivery (configuration)
+## Email delivery & verification
 
-The backend sends verification emails using the configured provider.
-
-- **`EMAIL_PROVIDER`**: defaults to `resend` when unset.
-  - Supported: `resend` (default), `ses`, `gmail`
-  - Legacy alias: `smtp` is treated as `gmail`
-- **`FROM_EMAIL`**: used only for `resend` and `ses` (do not use for `gmail`)
-- **`RESEND_API_KEY`**: required when using `resend`
-- **`AWS_REGION`**: used for AWS clients (including SES)
-
-See `backend/.env.example` for the full list of backend variable names.
+- Cognito currently sends only reset/notification emails via its default managed sender.
+- Pre Sign-up Lambda (`lambda/cognito_pre_signup/`) auto-confirms users, which keeps Cognito from sending “confirm your account” emails.
+- The backend now enforces email verification itself:
+  - `email_verification_codes` table stores salted hashes, TTL, resend cooldown, attempt counts.
+  - `POST /auth/cognito/verification/send` is a public, rate-limited endpoint that generates a 6-digit code and emails it via Resend (`RESEND_API_KEY`, `RESEND_FROM_EMAIL`).
+  - `POST /auth/cognito/verification/confirm` validates the code, sets `users.is_email_verified` + `email_verified_at`, and calls Cognito `AdminUpdateUserAttributes` with `Username = cognito_sub` so AWS reflects the same state.
+  - Middleware blocks all other APIs with `403 EMAIL_NOT_VERIFIED` until the DB flag is true (verification endpoints, logout, and `GET /users/me` are allowed so the UI can finish the flow).
 
 ---
 

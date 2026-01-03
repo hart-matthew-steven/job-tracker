@@ -43,24 +43,21 @@ Do not document secret values.
 - Alembic (and any manual migration commands) must source `migrations_database_url`, while the application server keeps using `database_url` so it never escalates privileges.
 - Legacy single-user vars (`DB_USER`, `DB_PASSWORD`) have been removed to make the separation explicit.
 
-### Password policy & rotation
+### Password policy
 
-- Configure via `PASSWORD_MIN_LENGTH` (default 14) and `PASSWORD_MAX_AGE_DAYS` (default 90).
+- Configure via `PASSWORD_MIN_LENGTH` (default 14).
 - Password strength is enforced on registration/change/reset: min length, upper/lowercase, number, special char, denylist, and “no email/name in password”.
-- The `users.password_changed_at` column tracks when the password was last updated. Migration backfills existing rows to their `created_at` so no one is forced to rotate immediately.
-- When `PASSWORD_MAX_AGE_DAYS` is greater than zero, logins that exceed that age still succeed, but API responses include `must_change_password: true`, allowing the frontend to redirect to the Change Password screen until the user rotates their credentials.
+- Rotation is governed by Cognito; the legacy `password_changed_at`/`must_change_password` flow was removed during the cutover.
 
-### Email configuration (backend)
+### Email verification (Resend)
 
-`EMAIL_PROVIDER` defaults to **`resend`** when unset.
-
-Supported providers:
-- `resend` (default): requires `FROM_EMAIL` + `RESEND_API_KEY`
-- `ses`: requires `AWS_REGION` + `FROM_EMAIL`
-- `gmail`: uses SMTP and preserves `SMTP_FROM_EMAIL` as the From address
-
-Legacy alias:
-- `smtp` is treated as `gmail`
+- App-enforced email verification relies on the Resend SDK. Set the following env vars locally (see `.env.example`):
+  - `EMAIL_VERIFICATION_ENABLED=true`
+  - `EMAIL_VERIFICATION_CODE_TTL_SECONDS`, `EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS`, `EMAIL_VERIFICATION_MAX_ATTEMPTS`
+  - `RESEND_API_KEY` (use a dev key) and `RESEND_FROM_EMAIL` (e.g., `Job Tracker <dev@jobapptracker.dev>`)
+  - `FRONTEND_BASE_URL` (defaults to `http://localhost:5173`)
+- Dev/testing can stub email delivery by pointing `RESEND_API_KEY` at a fake key and inspecting logs instead of sending live email.
+- The `/auth/cognito/verification/send` and `/confirm` endpoints are public so you can request/confirm codes before logging in. Rate limiting still applies; keep the cooldown in mind when testing.
 
 ---
 

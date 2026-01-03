@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import type { MemoryRouterProps } from "react-router-dom";
 import { render } from "@testing-library/react";
 
 import { ToastProvider } from "../components/ui/ToastProvider";
@@ -13,16 +14,16 @@ export function LocationDisplay() {
 export function renderWithRouter(
   ui: ReactElement,
   opts: {
-    route: string;
+    route: string | NonNullable<MemoryRouterProps["initialEntries"]>[number];
     path: string;
     extraRoutes?: Array<{ path: string; element: ReactElement }>;
   }
 ) {
   const { route, path, extraRoutes = [] } = opts;
-
+  const initialEntry = typeof route === "string" ? route : route;
   return render(
     <ToastProvider>
-      <MemoryRouter initialEntries={[route]}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
           <Route path={path} element={ui} />
           {extraRoutes.map((r) => (

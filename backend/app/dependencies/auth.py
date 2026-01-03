@@ -1,16 +1,11 @@
 # app/dependencies/auth.py
+"""Authentication dependencies for Cognito-backed FastAPI routes."""
 from __future__ import annotations
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError
-from sqlalchemy.orm import Session
+from fastapi import HTTPException, Request, status
 
-from app.core.security import verify_token_purpose
-from app.core.database import get_db
+from app.auth.identity import Identity
 from app.models.user import User
-
-bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def _unauthorized(detail: str = "Could not validate credentials") -> HTTPException:
@@ -19,42 +14,45 @@ def _unauthorized(detail: str = "Could not validate credentials") -> HTTPExcepti
         detail=detail,
         headers={"WWW-Authenticate": "Bearer"},
     )
-
-
-def get_current_user(
-    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-    db: Session = Depends(get_db),
-) -> User:
+def get_current_user(request: Request) -> User:
     """
-    Validates:
-      - Authorization: Bearer <token>
-      - token signature + exp
-      - user exists + is_active
-    Returns:
-      - User SQLAlchemy model
+    Retrieve the authenticated user from request state.
+
+    The identity middleware verifies the Cognito token and attaches the
+    database user. This dependency simply enforces that a valid, active user
+    exists for the current request.
     """
-    if not creds or creds.scheme.lower() != "bearer":
-        raise _unauthorized("Missing Authorization header")
-
-    try:
-        payload = verify_token_purpose(creds.credentials, expected_purpose="access")
-    except ValueError:
-        raise _unauthorized("Invalid or expired token")
-    except JWTError:
-        raise _unauthorized("Invalid or expired token")
-
-    email = str(payload.get("sub") or "").strip().lower()
-    if not email:
-        raise _unauthorized("Invalid or expired token")
-
-    token_version = int(payload.get("ver") or 0)
-
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise _unauthorized("User not found")
+    user = getattr(request.state, "user", None)
+    if user is None:
+        raise _unauthorized("Cognito authentication required")
     if not getattr(user, "is_active", True):
         raise _unauthorized("User is inactive")
-    if int(getattr(user, "token_version", 0) or 0) != token_version:
-        raise _unauthorized("Invalid or expired token")
-
     return user
+
+
+def get_identity(request: Request) -> Identity:
+    """
+    Get the current request's Identity object.
+
+    This is a lightweight dependency that returns the identity set by the
+    identity middleware after Cognito verification.
+
+    Returns Identity.unauthenticated() if no auth succeeded.
+
+    Use this when you need to inspect identity without requiring authentication.
+    For protected endpoints, continue using get_current_user.
+    """
+    identity = getattr(request.state, "identity", None)
+    if identity is None:
+        return Identity.unauthenticated()
+    return identity
+
+
+def get_current_user_db(request: Request) -> User | None:
+    """
+    Get the current DB user if authenticated (via either auth method).
+
+    Returns None if not authenticated. Does not raise exceptions.
+    Useful for optional authentication scenarios.
+    """
+    return getattr(request.state, "user", None)

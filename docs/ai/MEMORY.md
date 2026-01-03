@@ -7,7 +7,10 @@ Keep it concise, factual, and employer-facing.
 ## Current Implementation Status
 ### Frontend (`frontend-web/`)
 - App shell with responsive nav and account menu.
-- Auth pages: Login / Register / Verify (verify is auto-only via email link).
+- Auth pages: Login / Register / Verify (verify page triggers resend/confirm without needing to log in first).
+- Register page embeds Cloudflare Turnstile (invisible/managed mode). Tokens are fetched/reset per submit and appended to the `/auth/cognito/signup` payload.
+- Cognito currently relies on the default Cognito email sender (verification/reset emails come from AWS). A Pre Sign-up Lambda auto-confirms users and keeps Cognito from sending codes while we prep a future custom email flow; the SPA routes new signups straight to `/verify` so they can request/confirm the Resend code before logging in.
+- The backend now enforces email verification via `/auth/cognito/verification/{send,confirm}` (hashed 6-digit codes, TTL, cooldown, Resend delivery). Middleware blocks everything except the verification endpoints/logout/`GET /users/me` until `users.is_email_verified` is true. Successful confirmation also calls Cognito `AdminUpdateUserAttributes` with `Username=cognito_sub` so `email_verified=true` propagates to AWS/iOS clients.
 - Register + Change Password now share a password policy helper and inline `PasswordRequirements` list to block weak passwords before submission; backend error violations render in the UI.
 - Jobs page:
   - Server-side search + filters (q, tags, multi-select statuses)
@@ -25,42 +28,37 @@ Keep it concise, factual, and employer-facing.
 ### Backend (`backend/`)
 - FastAPI + SQLAlchemy + Alembic migrations.
 - Auth model:
-  - JWT access token via `Authorization: Bearer ...`
-  - Refresh tokens stored in DB, set as HttpOnly cookie
-  - Email verification required before login
+  - Cognito Option B (no Hosted UI). `/auth/cognito/*` implements signup/confirm/login/challenge/MFA/refresh/logout, and every request passes through the JWKS verifier in `app/auth/cognito.py`.
+  - Access/id tokens stay in memory + sessionStorage on the client; refresh tokens stay in sessionStorage only and flow through `/auth/cognito/refresh` (Cognito `REFRESH_TOKEN_AUTH`).
+  - Signup is protected by Cloudflare Turnstile (Chunk 8). `CognitoSignupIn` includes `turnstile_token`; backend verification posts to Cloudflare’s `/siteverify` endpoint and fails closed if keys are missing. Only signup is gated.
 - Users:
-  - `/users/me` returns user profile (includes `name`)
-  - `/users/me/change-password` validates current password, updates hash, revokes refresh tokens
+  - `users` table stores `email`, `name`, `cognito_sub`, `auth_provider`. Legacy password/email-verification columns were removed by `cognito_cutover_cleanup`.
+  - Identity middleware JIT-provisions a row on first Cognito login and attaches `request.state.user` for authorization checks.
 - Settings stored on user with `/users/me/settings` GET/PUT:
   - `auto_refresh_seconds`, `theme`, `default_jobs_sort`, `default_jobs_view`, `data_retention_days`
-- Email delivery:
-  - Provider default is **Resend** (when `EMAIL_PROVIDER` is unset).
-  - Supported providers: `resend` (default), `ses`, `gmail` (SMTP); legacy alias `smtp` → `gmail`.
-- Email verification:
-  - Tokens are JWTs with single-use IDs stored in `email_verification_tokens`; clicking a link consumes the record so resends invalidate prior links automatically.
+- Email delivery / verification:
+  - `/auth/cognito/verification/send` and `/confirm` are public (no login required). Codes are salted SHA-256 hashes with TTL/cooldown/attempt caps, delivered via Resend (`RESEND_API_KEY`, `RESEND_FROM_EMAIL`).
+  - Identity middleware blocks all other APIs with `403 EMAIL_NOT_VERIFIED` until `users.is_email_verified` is true; confirmation also calls Cognito `AdminUpdateUserAttributes` (`Username=cognito_sub`, `email_verified=true`).
 - Password policy:
-  - Configurable via `PASSWORD_MIN_LENGTH` (default 14) and `PASSWORD_MAX_AGE_DAYS` (default 90).
-  - `app/core/password_policy.py` enforces requirements (length, upper/lowercase, number, special char, denylist, no email/name).
-  - `users.password_changed_at` tracks rotations; login/refresh + `/users/me` responses include `must_change_password` so the frontend can gate access.
+  - `PASSWORD_MIN_LENGTH` (default 14) enforced at signup via `ensure_strong_password`. Requirements: length, upper/lowercase, number, special char, no email/name substrings, denylist.
 - Database access:
   - Runtime API connects with `DB_APP_USER` / `DB_APP_PASSWORD` (CRUD-only).
   - Alembic migrations run with `DB_MIGRATOR_USER` / `DB_MIGRATOR_PASSWORD` (DDL).
-  - Config exposes both URLs (`database_url`, `migrations_database_url`), keeping least privilege enforced in prod and dev.
+  - Config exposes both URLs (`database_url`, `migrations_database_url`) to keep least privilege enforced.
 - Optional integrations:
-  - `EMAIL_ENABLED` and `GUARD_DUTY_ENABLED` gate external dependencies; when disabled (default in Docker), email send + GuardDuty callbacks noop safely.
+  - `GUARD_DUTY_ENABLED` gates the GuardDuty malware callback; local/dev environments typically leave it disabled.
 - Deployment:
   - Production backend runs on AWS App Runner behind `https://api.jobapptracker.dev`, pulling ECR images built with `docker buildx --platform linux/amd64` and loading secrets from AWS Secrets Manager.
   - GitHub Actions handle production deploys: `backend-deploy.yml` builds/pushes images and calls `scripts/deploy_apprunner.py`; `frontend-deploy.yml` builds the Vite SPA, uploads a versioned release to S3, promotes it, updates metadata, invalidates CloudFront, and runs health checks via `scripts/deploy_frontend.py`.
 - Documents:
-  - Presigned S3 upload flow implemented (presign → upload to S3 → confirm).
- - Auth tokens:
-   - Access tokens include a `token_version`, letting the backend invalidate sessions by incrementing the column (e.g., on password change). Refresh tokens are still revoked server-side.
+  - Presigned S3 upload flow implemented (presign → upload to S3 → confirm). GuardDuty Malware Protection + Lambda forwarder update `scan_status` before downloads are allowed.
+- Debug endpoints `/auth/debug/token-info` + `/auth/debug/identity` remain dev-only. Authorization across the app depends on Cognito access tokens + DB ownership checks; there is no custom JWT mode anymore.
 
 ## What Is Working
-- Registration → email verification link → verification → login.
+- Cognito signup → confirm → login → MFA setup/verify → authenticated app access.
 - Logout + auth navigation guards.
 - Profile fetch.
-- Change password (shows validation errors; on success logs out and routes to login). Enforces the same password policy as registration; expired passwords trigger the change-password redirect.
+- Password policy helper reused for Cognito signup validations.
 - DB-backed settings (auto refresh + jobs defaults + theme + data retention preference).
 - Job listing + detail view (notes + documents panels) with auth.
 - Tags end-to-end (stored on jobs; filterable in UI; persisted in saved views).
@@ -92,6 +90,10 @@ Keep it concise, factual, and employer-facing.
 - Tailwind v4 note: `dark:` is configured to follow the `.dark` class via `@custom-variant` in `frontend-web/src/index.css` (not media-based).
 
 ## Recent Changes (High Signal)
+- Chunk 9 (rolled back): Cognito Custom Message Lambda removed; Cognito default emails restored while a new plan is evaluated.
+- Chunk 10: Added Pre Sign-up Lambda (auto-confirm, disable `autoVerifyEmail`) so signup doesn’t depend on Cognito email codes.
+- Chunk 11: App-enforced verification (hashed codes in DB, Resend delivery, Cognito admin sync, middleware 403) with updated frontend flow (signup redirects to `/verify`, public resend/confirm endpoints, redirect on 403 `EMAIL_NOT_VERIFIED`).
+- Chunk 8: Signup is now protected by Cloudflare Turnstile (`turnstile_token` field, backend verification, new env vars). Tests cover success/failure/missing token paths.
 - TypeScript migration completed for `frontend-web/` (`tsc --noEmit` passes; `allowJs=false`; no JS/JSX in `src/`).
 - Feature buildout completed: statuses/pipeline, saved views, search/filters, tags, timeline, interviews.
 - Settings expansion completed: defaults, auto refresh, theme (dark/light/system), data retention (UI-only hiding).
@@ -117,21 +119,18 @@ Keep it concise, factual, and employer-facing.
   - Lambda forwarder: `lambda/guardduty_scan_forwarder/` (EventBridge-triggered; parses GuardDuty findings; calls backend)
   - Architecture docs: `docs/architecture/security.md`, `docs/architecture/data-flow.md`
   - **Migrated from ClamAV** (removed SQS, EFS-based definitions, quarantine logic) to **AWS GuardDuty Malware Protection for S3**.
- - Email delivery refactor:
-  - Default provider is `resend` with Resend Python SDK.
-  - Env vars: `FROM_EMAIL` (ses/resend only), `RESEND_API_KEY`, `AWS_REGION` for SES.
-  - Backend env var example is generated at `backend/.env.example` via `tools/generate_env_example.py`.
+- Legacy email service removed:
+  - Deleted Resend/SES/SMTP helpers and env vars; future notification work will live in Cognito-triggered Lambdas.
 - Hosting upgrade:
   - Backend Dockerfile + README updated for App Runner (ECR build/push commands, `--platform linux/amd64` requirement, secrets from AWS Secrets Manager, health checks hitting `/health`).
 - CI/CD automation:
   - `backend-deploy.yml` + `scripts/deploy_apprunner.py` build/push the API image, update App Runner, wait for health, and roll back on failure.
   - `frontend-deploy.yml` + `scripts/deploy_frontend.py` version frontend builds in S3, promote releases, invalidate CloudFront, and keep rollback metadata in `_releases/current.json`.
-- GuardDuty + email gating:
-  - Introduced `EMAIL_ENABLED` / `GUARD_DUTY_ENABLED` feature flags so local Docker can run without external services; added noop handlers + test coverage.
-- Password policy + rotation:
-  - Added password policy helper + env vars, enforced at registration/change flows.
-  - Alembic migration backfilled `password_changed_at`; auth responses expose `must_change_password`.
-  - Frontend mirrors the rules client-side and blocks weak passwords with a shared helper + requirements UI.
+- GuardDuty gating:
+  - Introduced the `GUARD_DUTY_ENABLED` feature flag so local Docker can run without GuardDuty; added noop handlers + test coverage.
+- Password policy:
+  - `ensure_strong_password` helper + shared frontend UI enforce uppercase/lowercase/number/special/no email/name.
+  - Rotation-specific columns were removed once Cognito became the sole auth provider.
 
 ## Utilities
 - Dev DB reset + S3 cleanup script: `temp_scripts/reset_dev_db.py`

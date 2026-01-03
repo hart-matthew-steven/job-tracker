@@ -31,7 +31,7 @@ from app.services.documents import (
     require_size_bytes,
 )
 
-router = APIRouter(prefix="/jobs", tags=["documents"], dependencies=[Depends(get_current_user)])
+router = APIRouter(prefix="/jobs", tags=["documents"])
 logger = logging.getLogger(__name__)
 
 
@@ -253,23 +253,30 @@ def confirm_upload(
     return doc
 
 
-@router.post("/{job_id}/documents/scan-result")
+@router.post("/{job_id}/documents/{document_id}/scan-result")
 def document_scan_result(
     request: Request,
     job_id: int,
+    document_id: int,
     payload: DocumentScanIn,
-    x_scan_secret: str | None = Header(default=None),
+    x_scan_secret: str | None = Header(default=None, alias="x-scan-secret"),
+    x_doc_scan_secret: str | None = Header(default=None, alias="x-doc-scan-secret"),
     db: Session = Depends(get_db),
 ):
     # Lambda endpoint: shared secret auth
     if not settings.GUARD_DUTY_ENABLED:
-        logger.info("GuardDuty disabled; ignoring /jobs/%s/documents/scan-result", job_id)
+        logger.info("GuardDuty disabled; ignoring /jobs/%s/documents/%s/scan-result", job_id, document_id)
         return {"ok": False, "guard_duty_enabled": False}
 
     if not settings.DOC_SCAN_SHARED_SECRET:
         raise HTTPException(status_code=500, detail="Server missing DOC_SCAN_SHARED_SECRET")
 
-    if x_scan_secret != settings.DOC_SCAN_SHARED_SECRET:
+    provided_secret = x_scan_secret or x_doc_scan_secret
+    if provided_secret != settings.DOC_SCAN_SHARED_SECRET:
+        logger.info(
+            "GuardDuty scan secret mismatch: header_present=%s",
+            bool(provided_secret),
+        )
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     # Load job + doc (no user here; secret is the auth)
@@ -277,9 +284,17 @@ def document_scan_result(
     if not job:
         raise HTTPException(status_code=404, detail="Job application not found")
 
+    payload_document_id = getattr(payload, "document_id", None)
+    if payload_document_id and payload_document_id != document_id:
+        logger.warning(
+            "GuardDuty payload document_id mismatch: path=%s payload=%s",
+            document_id,
+            payload_document_id,
+        )
+
     doc = (
         db.query(JobDocument)
-        .filter(JobDocument.id == payload.document_id, JobDocument.application_id == job_id)
+        .filter(JobDocument.id == document_id, JobDocument.application_id == job_id)
         .first()
     )
     if not doc:

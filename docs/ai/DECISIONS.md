@@ -46,6 +46,7 @@ Record decisions that affect structure or long-term direction.
 - Consequences:
   - `/auth/refresh` rotates refresh tokens and returns new access token.
   - `/users/me/change-password` revokes refresh tokens to force re-login.
+  - **Superseded:** Removed in Chunk 7 when Cognito tokens became the only credential type and refresh cookies/DB tables were deleted.
 
 ---
 
@@ -58,13 +59,13 @@ Record decisions that affect structure or long-term direction.
 
 ---
 
-## 2025-12-21 — Email delivery providers: default to Resend; SES/Gmail supported
-- Decision: Default email provider is `resend` when `EMAIL_PROVIDER` is unset. Supported providers are `resend`, `ses`, and `gmail` (SMTP). Treat `EMAIL_PROVIDER=smtp` as a legacy alias for `gmail`.
-- Rationale: Resend provides an easy, modern integration for transactional emails; keeping SES and SMTP allows flexibility for AWS-hosted production and simple dev setups.
+## 2026-01-02 — Legacy email service removed
+- Decision: Remove the backend email service and associated env vars. Email verification/reset flows are owned by Cognito (and future Cognito-triggered Lambdas) instead of the FastAPI app.
+- Rationale: After the Cognito cutover, the backend no longer sends emails directly; keeping dormant SMTP/SES/Resend code added maintenance and dependency surface without delivering value.
 - Consequences:
-  - Backend uses `FROM_EMAIL` for `resend`/`ses` only; Gmail/SMTP preserves `SMTP_FROM_EMAIL`.
-  - Resend requires `RESEND_API_KEY`.
-  - SES uses `AWS_REGION` for client initialization (no SES-specific region var).
+  - Deleted `app/services/email.py`, its tests, and `resend` dependency.
+  - Removed `EMAIL_*`, `RESEND_API_KEY`, and `SMTP_*` env vars/docs.
+  - Future notification/verification work will live alongside Cognito (e.g., Lambda trigger -> Resend) rather than the FastAPI server.
 
 ---
 
@@ -80,13 +81,11 @@ Record decisions that affect structure or long-term direction.
   - **Verdict source of truth**: GuardDuty marks S3 objects with the tag `GuardDutyMalwareScanStatus`. EventBridge events may not include tags, so the Lambda forwarder reads the verdict via S3 `GetObjectTagging` when needed (requires `s3:GetObjectTagging` scoped to the upload prefix).
   - **Infected files**: Remain in S3 but download is blocked by backend; no quarantine/copy needed (GuardDuty marks them).
 
-## 2025-12-23 — Password policy + rotation enforcement
-- Decision: Introduce configurable password strength + expiration rules (`PASSWORD_MIN_LENGTH` default 14, `PASSWORD_MAX_AGE_DAYS` default 90) enforced whenever passwords are set/changed. Track `password_changed_at` on users and surface `must_change_password` in auth responses so the frontend can gate access until users rotate.
-- Rationale: Aligns with least-privilege goals and security review feedback; prevents weak credentials at creation time while letting existing accounts continue signing in until they update.
+## 2025-12-23 — Password policy enforcement
+- Decision: Introduce configurable password strength rules (`PASSWORD_MIN_LENGTH` default 14) enforced whenever passwords are set/changed. (Initial design also tracked expiration via `PASSWORD_MAX_AGE_DAYS`, which was removed once Cognito became the sole auth provider.)
+- Rationale: Aligns with least-privilege goals and security review feedback; prevents weak credentials at creation time while allowing existing accounts to continue signing in.
 - Consequences:
-  - New backend helper (`app/core/password_policy.py`) validates requirements and rejects weak passwords with structured `WEAK_PASSWORD` errors.
-  - Alembic migration adds + backfills `password_changed_at`.
-  - Login/refresh responses include `must_change_password`; `/users/me` mirrors it for UI gating.
+  - Backend helper (`app/core/password_policy.py`) validates requirements and rejects weak passwords with structured `WEAK_PASSWORD` errors.
   - Frontend uses shared helper (`src/lib/passwordPolicy.ts`) + `PasswordRequirements` component to block weak passwords client-side and display violations.
   - Docs + `.env.example` document the new env vars.
 
@@ -127,6 +126,157 @@ Record decisions that affect structure or long-term direction.
   - Workflows assume AWS roles via OIDC; repo secrets now point to role ARNs + target resources.
   - Deploy scripts encapsulate waiting/rollback logic; failures trigger automatic rollback to the last good build.
   - Future work focuses on branch protection, observability, and staged environments rather than hand-deploy steps.
+
+---
+
+## 2025-12-31 — Cognito auth migration: read-only verifier first (Chunk 1)
+- Decision: Introduce Cognito JWT verification as a read-only capability before switching auth enforcement.
+- Rationale:
+  - Incremental migration reduced risk.
+  - Verified JWKS/issuer/audience logic before any enforcement.
+  - Debug endpoint enabled local token inspection without touching prod.
+- Consequences:
+  - Added `app/auth/cognito.py` for JWKS fetching/caching and JWT validation.
+  - `/auth/debug/token-info` endpoint (dev-only, feature flagged).
+
+---
+
+## 2025-12-31 — Cognito auth migration: unified identity model (Chunk 2)
+- Decision: Introduce a canonical `Identity` dataclass (`app/auth/identity.py`). Set `request.state.identity` on every request.
+- Rationale:
+  - Downstream code should remain provider-agnostic and never inspect raw tokens.
+  - Provides a stable reference for AI usage tracking/billing.
+- Consequences:
+  - `Identity` captures `user_id`, `auth_provider`, `external_subject`, `email`, `is_authenticated`.
+  - `/auth/debug/identity` endpoint for dev-only inspection.
+
+---
+
+## 2025-12-31 — Cognito auth migration: profile completion enforcement (Chunk 3) *(retired)*
+- Decision (superseded by Chunk 5): Introduce `UserProfile` model and middleware to gate Cognito users until they complete their profile. Custom auth users bypass this gate entirely.
+- Rationale:
+  - AI features and billing require a consistent user record before resource consumption.
+  - iOS onboarding needs a clear profile completion step.
+  - Gating ensures data integrity — users can't create jobs/notes until their profile exists.
+  - Keeping custom auth users ungated provided backward compatibility during migration.
+- Consequences:
+  - New `user_profiles` table tracks: `user_id`, `auth_provider`, `external_subject`, `email`, `profile_completed`.
+  - Profile gating middleware returns `403 PROFILE_INCOMPLETE` for protected routes when profile is incomplete.
+  - Allowed routes for incomplete profiles: `/health`, `/me/profile`, `/me/profile/complete`, `/auth/*`.
+  - Profiles auto-created on first Cognito request (idempotent).
+  - `/me/profile` and `/me/profile/complete` endpoints added.
+  - Historical rollback (pre-cutover) involved disabling the middleware.
+
+---
+
+## 2025-12-31 — Cognito auth migration: backend authorization + JIT users (Chunk 4)
+- Decision: Make Cognito the primary authentication source with user auto-provisioning. Add `cognito_sub`/`auth_provider` metadata to the User model.
+- Rationale:
+  - Consistent user identity across clients (web, iOS) requires a single source of truth.
+  - JIT provisioning eliminates separate signup flows — Cognito owns user registration.
+  - Profile completion gating ensures users exist in DB before consuming resources.
+  - Using the User model (not separate UserProfile) simplifies authorization queries.
+- Consequences:
+  - User model gained `cognito_sub` (unique) and `auth_provider`.
+  - `password_hash` became nullable, anticipating eventual removal.
+  - Migration `g8b9c0d1e2f3_add_cognito_fields_to_users.py`.
+  - Identity middleware now provisions users on first Cognito-authenticated request.
+  - AI features can safely key on `cognito_sub`.
+
+---
+
+## 2025-12-31 — Cognito auth migration: Option B BFF endpoints (Chunk 5)
+- Decision: Remove the temporary profile gate + `user_profiles` table and introduce backend-driven Cognito flows (`/auth/cognito/*`) so the SPA never talks to Cognito directly.
+- Rationale:
+  - Cognito already requires name + email; storing a duplicate profile table created churn without delivering value.
+  - Backend-for-Frontend keeps session issuance, logging, and MFA UX consistent while still honouring Cognito’s security posture.
+  - Handling TOTP challenges server-side simplifies frontend work and future iOS/native clients.
+  - Keeping `cognito_sub` on `users` allows AI/billing systems to key on a single identifier, regardless of client.
+- Consequences:
+  - Migration `h1c2d3e4f5a6_remove_profile_tables.py` dropped `user_profiles`, removed `users.profile_completed_at`, and enforced `users.name` NOT NULL.
+  - Added `app/services/cognito_client.py` and `app/routes/auth_cognito.py`.
+  - SPA now talks only to backend endpoints; responses expose deterministic `status`/`next_step`.
+
+---
+
+## 2025-12-31 — Cognito auth migration: TOTP enforcement + challenge contract (Chunk 6)
+- Decision: Normalize `/auth/cognito/*` responses so the frontend can render a custom UI for required TOTP MFA without Cognito-specific knowledge.
+- Rationale:
+  - Cognito challenges are verbose/unstable; the SPA needs a stable `next_step`.
+  - MFA setup vs. MFA entry require different UX flows but should reuse the same backend session.
+  - Returning `session` + `next_step` lets iOS/SPAs drive the flow without re-implementing Cognito SDKs.
+- Consequences:
+  - `CognitoAuthResponse.status` is now `OK` or `CHALLENGE`, with `next_step` ∈ {`MFA_SETUP`, `SOFTWARE_TOKEN_MFA`, `NEW_PASSWORD_REQUIRED`, `CUSTOM_CHALLENGE`, `UNKNOWN`}.
+  - `/auth/cognito/mfa/setup` returns `{secret_code, otpauth_uri, session}`; `/auth/cognito/mfa/verify` responds to the `MFA_SETUP` challenge with `ANSWER=SUCCESS`.
+  - `/auth/cognito/challenge` expects explicit `responses` (e.g., `SOFTWARE_TOKEN_MFA_CODE`) and always echoes `session` + `next_step`.
+  - Tests (`tests/test_auth_cognito_bff.py`) cover login OK, MFA_SETUP, SOFTWARE_TOKEN_MFA, OTP setup/verify, and refresh-cookie issuance.
+  - Documentation (`README.md`, `docs/architecture/cognito-option-b.md`, `docs/user-lifecycle.md`, `docs/ai/*`) now includes the curl-based reference flow.
+
+---
+
+## 2026-01-02 — Cognito auth migration: production cutover (Chunk 7)
+- Decision: Remove legacy custom auth, rely solely on Cognito-issued tokens (access/id/refresh), and expose the refresh flow via `/auth/cognito/refresh`.
+- Rationale:
+  - Simplifies security posture and removes dual-mode edge cases.
+  - Unlocks native/iOS clients (same API contract) and future passkey work.
+- Consequences:
+  - Migration `cognito_cutover_cleanup` dropped refresh/email-verification tables and password metadata; `cognito_sub` is `NOT NULL`.
+  - Backend rejects non-Cognito Bearer tokens.
+  - SPA stores tokens in memory/sessionStorage; refresh tokens never touch cookies/localStorage.
+  - Rate limiting + structured logging tightened around `/auth/cognito/*`.
+
+## 2026-01-03 — Signup bot protection (Chunk 8)
+- Decision: Gate `/auth/cognito/signup` behind Cloudflare Turnstile (invisible mode) and verify tokens server-side before calling Cognito.
+- Rationale:
+  - Automated signups were the last unguarded way to burn Cognito/email/MFA quota and bootstrap abusive accounts for future AI features.
+  - Turnstile gives us a privacy-friendly, UX-light CAPTCHA with a simple verification API and no Google account dependency.
+- Consequences:
+  - Frontend loads the Turnstile widget on `/register`, stores tokens in memory, and resets the widget after each submit.
+  - Backend module `app/services/turnstile.py` posts tokens to Cloudflare via `https://challenges.cloudflare.com/turnstile/v0/siteverify` with short timeouts. Missing config fails closed (HTTP 503) so signup never bypasses CAPTCHA accidentally.
+  - Signup schema (`CognitoSignupIn`) gained `turnstile_token`. Tests cover happy-path, missing token, verification failure, and network errors.
+  - New env vars (`TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `VITE_TURNSTILE_SITE_KEY`) documented in README/docs.
+
+## 2026-01-04 — Cognito emails via Resend (Chunk 9)
+- Decision: Introduce a standalone Cognito Custom Message Lambda (container image) that renders branded templates and sends through Resend’s official Python SDK.
+- Rationale:
+  - Cognito’s default SES emails are unbranded and can confuse users; we want consistent messaging from `jobapptracker.dev`.
+  - Using Resend SDK (instead of raw HTTP) keeps the integration small, typed, and easier to upgrade.
+  - Secrets live in AWS Secrets Manager with optional env overrides so we don’t bake API keys into images.
+- Consequences:
+  - New code under `lambda/cognito_custom_message/` with templates, requirements, Dockerfile, and pytest coverage (Resend + Secrets Manager mocked). **(Superseded by 2026-01-05 decision below.)**
+  - Lambda fails closed—if Resend errors we raise, so Cognito doesn’t send its fallback email.
+  - Documentation: `README.md` (overview + build/push instructions), `docs/auth-cognito-email.md`, and `docs/ai/*` now describe the flow and security posture.
+
+## 2026-01-05 — Retire Cognito email lambda (Chunk 1B cleanup)
+- Decision: Remove the Cognito Custom Message Lambda code/docs because the AWS resources were deleted and the architecture reverted to Cognito’s default email sender.
+- Rationale:
+  - Keeping dead code and deployment steps causes drift and confuses runbooks/CI.
+  - Resend-specific env vars/tests/templates were unused elsewhere.
+- Consequences:
+  - Deleted `lambda/cognito_custom_message/` and `docs/auth-cognito-email.md`.
+  - `.env.example`, README, and `docs/ai/*` no longer mention Resend-trigger Lambda work; Cognito default emails are documented as the current state.
+  - GuardDuty lambda and other services remain untouched.
+
+## 2026-01-06 — Cognito Pre Sign-up Lambda (Chunk 10)
+- Decision: Add a tiny Pre Sign-up Lambda that auto-confirms users and disables Cognito-managed email verification while we own verification out of band.
+- Rationale:
+  - Cognito’s default confirmation emails conflict with the planned Resend workflows.
+  - Auto-confirming keeps signup friction low and avoids support tickets for missing codes.
+- Consequences:
+  - New lambda under `lambda/cognito_pre_signup/` (container image, handler, README).
+  - Documentation updated (`README.md`, `docs/auth-cognito-pre-signup.md`, `docs/ai/*`).
+  - Lambda performs no network calls or secret access; it only flips response flags.
+
+## 2026-01-07 — App-enforced email verification (Chunk 11)
+- Decision: Store hashed verification codes in our DB, send via Resend, and block API access until users confirm the code.
+- Rationale:
+  - Cognito email confirmation was disabled by the Pre Sign-up Lambda; we still need a trustworthy verification state for AI billing/iOS parity.
+  - Owning the flow lets us throttle resend abuse, support custom templates, and keep DB + Cognito in sync.
+- Consequences:
+  - New table `email_verification_codes`, `users` regained `is_email_verified`/`email_verified_at`.
+  - Endpoints: `/auth/cognito/verification/send` and `/auth/cognito/verification/confirm` are public (rate-limited, salted SHA-256 hashes, TTL/cooldown). Signup links directly to `/verify` so users handle the code before their first login, but if they skip it the API still returns `403 EMAIL_NOT_VERIFIED`.
+  - Middleware blocks all other APIs with `403 EMAIL_NOT_VERIFIED` until the DB flag is true; verifying also calls Cognito `AdminUpdateUserAttributes` using `Username=cognito_sub`.
+  - Frontend exposes resend/cooldown UI on `/verify` and listens for `EMAIL_NOT_VERIFIED` responses to redirect back if someone logs in before completing the flow.
 
 ---
 

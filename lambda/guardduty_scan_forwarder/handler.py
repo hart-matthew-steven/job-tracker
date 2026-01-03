@@ -40,6 +40,23 @@ def _parse_document_id_from_key(key: str) -> int | None:
         return None
 
 
+def _parse_job_id_from_key(key: str) -> int | None:
+    if not key:
+        return None
+    parts = [p for p in key.split("/") if p]
+    try:
+        jobs_idx = parts.index("jobs")
+    except ValueError:
+        return None
+    if len(parts) < jobs_idx + 2:
+        return None
+    job_id_raw = parts[jobs_idx + 1]
+    try:
+        return int(job_id_raw)
+    except ValueError:
+        return None
+
+
 def _find_first(obj: Any, candidates: set[str]) -> Any | None:
     """
     Walk a nested dict/list and return the first value for a matching key name.
@@ -278,17 +295,25 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:  # noqa: ARG
     else:
         scan_message = f"Scan {completion_norm.lower()}: {verdict_norm} (GuardDuty)"
 
-    url = f"{backend_base}/internal/documents/{doc_id}/scan-result"
-    payload = {
-        "scan_status": scan_status,
-        "scan_message": scan_message,
+    # New scan-result callback lives under /jobs/{job_id}/documents/{document_id}/scan-result
+    # Since the S3 key includes the job_id as part of the prefix, extract it alongside doc_id.
+    job_id = _parse_job_id_from_key(key)
+    if job_id is None:
+        print(json.dumps({"msg": "parse_failed", "reason": "missing_job_id_in_key", "bucket": bucket, "key": key, "event": event}))
+        raise RuntimeError("Could not parse job_id from key")
+
+    url = f"{backend_base}/jobs/{job_id}/documents/{doc_id}/scan-result"
+    payload: dict[str, Any] = {
+        "document_id": doc_id,
+        "result": scan_status.lower(),
+        "detail": scan_message,
         "bucket": bucket,
         "s3_key": key,
         "provider": "guardduty",
         "occurred_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    headers = {"X-Doc-Scan-Secret": secret, "Content-Type": "application/json"}
+    headers = {"X-Scan-Secret": secret, "Content-Type": "application/json"}
 
     res = requests.post(url, headers=headers, json=payload, timeout=15)
     if res.status_code < 200 or res.status_code >= 300:

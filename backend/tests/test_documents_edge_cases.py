@@ -111,7 +111,7 @@ def test_infected_scan_blocks_download_and_sets_status(client):
     app_config.settings.GUARD_DUTY_ENABLED = True
     app_config.settings.DOC_SCAN_SHARED_SECRET = "scan_secret"
     res3 = client.post(
-        f"/jobs/{job['id']}/documents/scan-result",
+        f"/jobs/{job['id']}/documents/{doc['id']}/scan-result",
         headers={"x-scan-secret": "scan_secret"},
         json={"document_id": doc["id"], "result": "infected"},
     )

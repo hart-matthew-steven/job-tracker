@@ -6,15 +6,11 @@ import type {
   CreateJobIn,
   DocumentItem,
   Job,
-  LoginIn,
-  LoginOut,
   MessageOut,
   Note,
   PatchJobIn,
   PresignUploadIn,
   PresignUploadOut,
-  RegisterIn,
-  ResendVerificationIn,
   UpdateSettingsIn,
   UserMeOut,
   UserSettingsOut,
@@ -27,15 +23,28 @@ import type {
   PatchInterviewIn,
 } from "./types/api";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
+import API_BASE from "./lib/apiBase";
+import {
+  clearSession as clearAuthSession,
+  ensureValidAccessToken,
+  getAccessToken,
+  refreshSession,
+} from "./auth/tokenManager";
 
-const TOKEN_KEY = "access_token";
 type LogoutListener = () => void;
 const logoutListeners = new Set<LogoutListener>();
+
+type EmailVerificationListener = (data?: { email?: string }) => void;
+const emailVerificationListeners = new Set<EmailVerificationListener>();
 
 export function subscribeToUnauthorizedLogout(listener: LogoutListener): () => void {
   logoutListeners.add(listener);
   return () => logoutListeners.delete(listener);
+}
+
+export function subscribeToEmailVerificationRequired(listener: EmailVerificationListener): () => void {
+  emailVerificationListeners.add(listener);
+  return () => emailVerificationListeners.delete(listener);
 }
 
 function notifyUnauthorizedLogout() {
@@ -48,25 +57,15 @@ function notifyUnauthorizedLogout() {
   });
 }
 
-export function setAccessToken(token: string | null): void {
-  if (!token) localStorage.removeItem(TOKEN_KEY);
-  else localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function getAccessToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
 export function logout(): void {
-  setAccessToken(null);
+  clearAuthSession();
 }
 
-/**
- * Only attach Authorization for calls to *our* API base.
- * (Presigned S3 URLs, etc. must never receive Authorization headers.)
- */
-function isApiPath(path: string): boolean {
-  return typeof path === "string" && path.startsWith("/");
+function requiresAuth(path: string): boolean {
+  if (typeof path !== "string") return false;
+  if (!path.startsWith("/")) return false;
+  if (path.startsWith("/auth/cognito/verification")) return false;
+  return !path.startsWith("/auth/");
 }
 
 type JsonRequestOptions = Omit<RequestInit, "headers"> & { headers?: Record<string, string> };
@@ -110,90 +109,65 @@ async function parseError(res: Response): Promise<ParsedError> {
   return { message: text || fallback };
 }
 
-/** -------------------
- * Refresh token (HttpOnly cookie) support
- * ------------------- */
-
-// Prevent multiple simultaneous refresh calls
-let refreshPromise: Promise<string | null> | null = null;
-
-/**
- * POST /auth/refresh
- * Uses HttpOnly refresh cookie (credentials: include)
- * Returns { access_token, token_type }
- */
-async function tryRefreshAccessToken(): Promise<string | null> {
-  if (refreshPromise) return refreshPromise;
-
-  refreshPromise = (async () => {
-    try {
-      const res = await fetch(`${API_BASE}/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-      });
-
-      if (!res.ok) return null;
-
-      const data: unknown = await res.json().catch(() => null);
-      const accessToken =
-        typeof data === "object" && data && "access_token" in data ? (data as { access_token?: unknown }).access_token : null;
-
-      if (typeof accessToken === "string" && accessToken) {
-        setAccessToken(accessToken);
-        return accessToken;
-      }
-      return null;
-    } catch {
-      return null;
-    } finally {
-      refreshPromise = null;
-    }
-  })();
-
-  return refreshPromise;
-}
-
 /**
  * JSON request helper:
- * - Adds Authorization for /paths
- * - Sends cookies (needed for refresh cookie workflows)
+ * - Adds Authorization for protected paths
  * - On 401: try refresh once, retry once
  */
-async function requestJson<T = unknown>(path: string, options: JsonRequestOptions = {}): Promise<T> {
-  const includeAuth = isApiPath(path);
+export async function requestJson<T = unknown>(path: string, options: JsonRequestOptions = {}): Promise<T> {
+  const includeAuth = requiresAuth(path);
+  if (includeAuth) {
+    await ensureValidAccessToken();
+  }
   const baseHeaders = buildHeaders(options, { includeAuth });
 
   const doFetch = (hdrs: Record<string, string>) =>
     fetch(`${API_BASE}${path}`, {
       ...options,
       headers: hdrs,
-      credentials: "include",
+      credentials: "omit",
     });
 
   let res = await doFetch(baseHeaders);
 
   // Attempt refresh once for API calls when authed request fails
   if (includeAuth && res.status === 401) {
-    const newToken = await tryRefreshAccessToken();
+    const refreshed = await refreshSession();
 
-    if (newToken) {
-      // IMPORTANT: preserve original headers (Content-Type, etc) and just overwrite Authorization
-      const retryHeaders = { ...baseHeaders, Authorization: `Bearer ${newToken}` };
+    if (refreshed?.accessToken) {
+      const retryHeaders = { ...baseHeaders, Authorization: `Bearer ${refreshed.accessToken}` };
       res = await doFetch(retryHeaders);
     } else {
-      logout();
+      clearAuthSession();
       notifyUnauthorizedLogout();
     }
   }
 
   if (!res.ok) {
     if (res.status === 401) {
-      logout();
+      clearAuthSession();
       notifyUnauthorizedLogout();
     }
 
     const { message, detail } = await parseError(res);
+    if (res.status === 403) {
+      const payload = (typeof detail === "object" && detail !== null ? (detail as Record<string, unknown>) : {}) as {
+        code?: string;
+        error?: string;
+        email?: string;
+      };
+      const code = (payload.code || payload.error || "").toString().toUpperCase();
+      if (code === "EMAIL_NOT_VERIFIED") {
+        emailVerificationListeners.forEach((fn) => {
+          try {
+            fn({ email: payload.email });
+          } catch {
+            // ignore listener errors
+          }
+        });
+      }
+    }
+
     const error = new Error(message) as Error & { detail?: unknown; status?: number };
     if (detail !== undefined) error.detail = detail;
     error.status = res.status;
@@ -211,32 +185,54 @@ async function requestJson<T = unknown>(path: string, options: JsonRequestOption
 /**
  * Void request helper (same refresh logic).
  */
-async function requestVoid(path: string, options: JsonRequestOptions = {}): Promise<void> {
-  const includeAuth = isApiPath(path);
+export async function requestVoid(path: string, options: JsonRequestOptions = {}): Promise<void> {
+  const includeAuth = requiresAuth(path);
+  if (includeAuth) {
+    await ensureValidAccessToken();
+  }
   const baseHeaders = buildHeaders(options, { includeAuth });
 
   const doFetch = (hdrs: Record<string, string>) =>
     fetch(`${API_BASE}${path}`, {
       ...options,
       headers: hdrs,
-      credentials: "include",
+      credentials: "omit",
     });
 
   let res = await doFetch(baseHeaders);
 
   if (includeAuth && res.status === 401) {
-    const newToken = await tryRefreshAccessToken();
+    const refreshed = await refreshSession();
 
-    if (newToken) {
-      const retryHeaders = { ...baseHeaders, Authorization: `Bearer ${newToken}` };
+    if (refreshed?.accessToken) {
+      const retryHeaders = { ...baseHeaders, Authorization: `Bearer ${refreshed.accessToken}` };
       res = await doFetch(retryHeaders);
     } else {
-      logout();
+      clearAuthSession();
+      notifyUnauthorizedLogout();
     }
   }
 
   if (!res.ok) {
     const { message, detail } = await parseError(res);
+    if (res.status === 403) {
+      const payload = (typeof detail === "object" && detail !== null ? (detail as Record<string, unknown>) : {}) as {
+        code?: string;
+        error?: string;
+        email?: string;
+      };
+      const code = (payload.code || payload.error || "").toString().toUpperCase();
+      if (code === "EMAIL_NOT_VERIFIED") {
+        emailVerificationListeners.forEach((fn) => {
+          try {
+            fn({ email: payload.email });
+          } catch {
+            // ignore listener errors
+          }
+        });
+      }
+    }
+
     const error = new Error(message) as Error & { detail?: unknown; status?: number };
     if (detail !== undefined) error.detail = detail;
     error.status = res.status;
@@ -244,50 +240,12 @@ async function requestVoid(path: string, options: JsonRequestOptions = {}): Prom
   }
 }
 
-/** -------------------
- * Auth
- * ------------------- */
-export function registerUser(payload: RegisterIn): Promise<MessageOut> {
-  return requestJson<MessageOut>(`/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-}
-
-export function verifyEmail(token: string): Promise<MessageOut> {
-  return requestJson<MessageOut>(`/auth/verify?token=${encodeURIComponent(token)}`);
-}
-
-export function resendVerification(payload: ResendVerificationIn): Promise<MessageOut> {
-  return requestJson<MessageOut>(`/auth/resend-verification`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function loginUser(payload: LoginIn): Promise<LoginOut> {
-  // ✅ MUST include credentials so browser stores HttpOnly refresh cookie
-  const res = await requestJson<LoginOut>(`/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    credentials: "include",
-  });
-
-  if (res?.access_token) setAccessToken(res.access_token);
-  return res;
-}
-
 export async function logoutUser(): Promise<void> {
+  clearAuthSession();
   try {
-    // ✅ sends cookie so backend can revoke + clear it
-    await requestVoid(`/auth/logout`, { method: "POST", credentials: "include" });
+    await fetch(`${API_BASE}/auth/cognito/logout`, { method: "POST", credentials: "omit" });
   } catch {
-    // ignore
-  } finally {
-    logout();
+    // backend logout is best-effort
   }
 }
 
