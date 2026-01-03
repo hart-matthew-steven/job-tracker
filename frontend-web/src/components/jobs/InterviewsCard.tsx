@@ -84,9 +84,9 @@ export default function InterviewsCard({
 
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="text-xl font-semibold">Interviews</div>
-        <div className="flex items-center gap-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-2">
+          <div className="text-xl font-semibold">Interviews</div>
           <button
             type="button"
             onClick={() => setOpen(true)}
@@ -94,8 +94,12 @@ export default function InterviewsCard({
           >
             + Add interview
           </button>
-          {onToggleCollapse && <CollapseToggle collapsed={collapsed} onToggle={onToggleCollapse} label="interviews section" />}
         </div>
+        {onToggleCollapse && (
+          <div className="ml-auto">
+            <CollapseToggle collapsed={collapsed} onToggle={onToggleCollapse} label="interviews section" />
+          </div>
+        )}
       </div>
 
       {!collapsed && (

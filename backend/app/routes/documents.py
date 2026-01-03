@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import hashlib
 import logging
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
@@ -253,6 +254,12 @@ def confirm_upload(
     return doc
 
 
+def _secret_signature(value: str | None) -> str:
+    if not value:
+        return "none"
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:10]
+
+
 @router.post("/{job_id}/documents/{document_id}/scan-result")
 def document_scan_result(
     request: Request,
@@ -272,10 +279,21 @@ def document_scan_result(
         raise HTTPException(status_code=500, detail="Server missing DOC_SCAN_SHARED_SECRET")
 
     provided_secret = x_scan_secret or x_doc_scan_secret
+    if provided_secret:
+        logger.info(
+            "GuardDuty secret debug: header_used=%s provided_len=%s configured_len=%s provided_sig=%s expected_sig=%s",
+            "X-Scan-Secret" if x_scan_secret else "X-Doc-Scan-Secret",
+            len(provided_secret),
+            len(settings.DOC_SCAN_SHARED_SECRET),
+            _secret_signature(provided_secret),
+            _secret_signature(settings.DOC_SCAN_SHARED_SECRET),
+        )
     if provided_secret != settings.DOC_SCAN_SHARED_SECRET:
         logger.info(
-            "GuardDuty scan secret mismatch: header_present=%s",
+            "GuardDuty scan secret mismatch: header_present=%s provided_len=%s expected_len=%s",
             bool(provided_secret),
+            len(provided_secret or ""),
+            len(settings.DOC_SCAN_SHARED_SECRET or ""),
         )
         raise HTTPException(status_code=401, detail="Unauthorized")
 

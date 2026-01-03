@@ -4,6 +4,7 @@ import json
 import os
 from datetime import datetime, timezone
 from typing import Any
+import hashlib
 
 import boto3
 from botocore.exceptions import ClientError
@@ -312,6 +313,18 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:  # noqa: ARG
         "provider": "guardduty",
         "occurred_at": datetime.now(timezone.utc).isoformat(),
     }
+
+    secret_sig = hashlib.sha256(secret.encode("utf-8")).hexdigest()[:10]
+    print(
+        json.dumps(
+            {
+                "msg": "scan_callback_debug",
+                "url": url,
+                "secret_len": len(secret),
+                "secret_sig": secret_sig,
+            }
+        )
+    )
 
     headers = {"X-Scan-Secret": secret, "Content-Type": "application/json"}
 
