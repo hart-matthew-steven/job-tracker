@@ -382,8 +382,13 @@ def send_verification_code_route(
         return EmailVerificationSendOut(status="OK", message="Email is already verified.")
 
     record = send_verification_code(db, user=user)
+    resend_available_at = record.resend_available_at
+    if resend_available_at.tzinfo is None:
+        resend_available_at = resend_available_at.replace(tzinfo=timezone.utc)
+    else:
+        resend_available_at = resend_available_at.astimezone(timezone.utc)
     cooldown_seconds = max(
-        0, int((record.resend_available_at - datetime.now(timezone.utc)).total_seconds())
+        0, int((resend_available_at - datetime.now(timezone.utc)).total_seconds())
     )
     return EmailVerificationSendOut(
         status="OK",

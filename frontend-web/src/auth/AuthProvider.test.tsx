@@ -42,6 +42,7 @@ describe("AuthProvider logout", () => {
         expiresAt: Date.now() + 60_000,
       })
     );
+    window.dispatchEvent(new StorageEvent("storage", { key: "jt.auth.session", newValue: sessionStorage.getItem("jt.auth.session") }));
     mockedLogout.mockResolvedValueOnce(undefined);
 
     render(

@@ -151,14 +151,15 @@ export default function RegisterPage() {
     if (turnstileToken) {
       return turnstileToken;
     }
-    if (!window.turnstile || !turnstileWidgetIdRef.current) {
+    const turnstile = window.turnstile;
+    if (!turnstile || !turnstileWidgetIdRef.current) {
       throw new Error("Verification is still loading. Please wait a moment and try again.");
     }
 
     return new Promise<string>((resolve, reject) => {
       pendingTurnstileRef.current = { resolve, reject };
       try {
-        window.turnstile.execute(turnstileWidgetIdRef.current!);
+        turnstile.execute(turnstileWidgetIdRef.current!);
       } catch (_err) {
         pendingTurnstileRef.current = null;
         reject(new Error("Verification failed. Please try again."));
@@ -241,8 +242,9 @@ export default function RegisterPage() {
       }
     } finally {
       setBusy(false);
-      if (captchaToken && window.turnstile && turnstileWidgetIdRef.current) {
-        window.turnstile.reset(turnstileWidgetIdRef.current);
+      const turnstile = window.turnstile;
+      if (captchaToken && turnstile && turnstileWidgetIdRef.current) {
+        turnstile.reset(turnstileWidgetIdRef.current);
       }
       setTurnstileToken("");
     }
