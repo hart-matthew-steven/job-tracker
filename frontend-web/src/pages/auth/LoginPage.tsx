@@ -32,7 +32,7 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  async function completeLogin(tokens: CognitoTokens | null | undefined, normalizedEmail: string) {
+  async function completeLogin(tokens: CognitoTokens | null | undefined) {
     if (!tokens?.access_token) {
       throw new Error("Login did not return an access token.");
     }
@@ -61,7 +61,7 @@ export default function LoginPage() {
       const res = await cognitoLogin(normalizedEmail, password);
 
       if (res.status === "OK") {
-        await completeLogin(res.tokens, normalizedEmail);
+        await completeLogin(res.tokens);
         return;
       }
 

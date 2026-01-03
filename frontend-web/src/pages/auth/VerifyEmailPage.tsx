@@ -1,5 +1,5 @@
 // src/pages/auth/VerifyEmailPage.tsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
 import type { FormEvent } from "react";
 
@@ -50,14 +50,6 @@ export default function VerifyEmailPage() {
   const autoSendEmailRef = useRef<string | null>(initialSent ? email : null);
   const initialSentRef = useRef(initialSent);
 
-  useEffect(() => {
-    if (!normalizedEmail) return;
-    if (cooldownUntil !== 0) return;
-    if (initialSentRef.current) return;
-    if (autoSendEmailRef.current === normalizedEmail) return;
-    autoSendEmailRef.current = normalizedEmail;
-    void handleSend(true);
-  }, [normalizedEmail, cooldownUntil, initialSent]);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -99,7 +91,7 @@ export default function VerifyEmailPage() {
     }
   }
 
-  async function handleSend(initial = false) {
+  const handleSend = useCallback(async (initial = false) => {
     if (!normalizedEmail) {
       if (!initial) {
         const msg = "Enter your email first.";
@@ -131,7 +123,16 @@ export default function VerifyEmailPage() {
     } finally {
       setSending(false);
     }
-  }
+  }, [normalizedEmail, cooldownUntil, toast]);
+
+  useEffect(() => {
+    if (!normalizedEmail) return;
+    if (cooldownUntil !== 0) return;
+    if (initialSentRef.current) return;
+    if (autoSendEmailRef.current === normalizedEmail) return;
+    autoSendEmailRef.current = normalizedEmail;
+    void handleSend(true);
+  }, [normalizedEmail, cooldownUntil, initialSent, handleSend]);
 
   const cooldownRemaining = Math.max(0, Math.ceil((cooldownUntil - nowTs) / 1000));
 

@@ -160,8 +160,11 @@ export default function RegisterPage() {
       pendingTurnstileRef.current = { resolve, reject };
       try {
         turnstile.execute(turnstileWidgetIdRef.current!);
-      } catch (_err) {
+      } catch (err) {
         pendingTurnstileRef.current = null;
+        if (import.meta.env.DEV) {
+          console.error("Turnstile execution failed", err);
+        }
         reject(new Error("Verification failed. Please try again."));
       }
     });
