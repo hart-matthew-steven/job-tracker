@@ -18,6 +18,9 @@
   - **Chunk 6** (completed): deterministic challenge handling + required TOTP setup/verify flows
   - **Chunk 7** (completed): production cutover — only Cognito tokens accepted, refresh endpoint wired, SPA stores tokens in sessionStorage/in-memory
   - **Chunk 8** (completed): Cloudflare Turnstile bot protection on signup (frontend widget + backend verification before calling Cognito)
+  - **Chunk 9** (rolled back): Custom Message Lambda removed; default Cognito emails restored
+  - **Chunk 10** (completed): Pre Sign-up Lambda auto-confirms users and disables Cognito email verification
+  - **Chunk 11** (completed): App-enforced email verification (hashed codes + TTL/cooldown in DB, Resend delivery, Cognito `AdminUpdateUserAttributes` sync, middleware 403) with public resend/confirm endpoints so signup flows through `/verify` before first login
 - Future chunks: passkeys, native iOS flows, AI usage/billing attribution, security hardening.
 
 ## Next

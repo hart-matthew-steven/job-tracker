@@ -49,9 +49,11 @@ Update it whenever key entry points or folder structure changes.
 - Data flow: `docs/architecture/data-flow.md`
 - Security: `docs/architecture/security.md`
 - Cognito Option B (BFF): `docs/architecture/cognito-option-b.md`
+- Pre sign-up Lambda: `docs/auth-cognito-pre-signup.md`
 
 ## Lambdas
 - GuardDuty forwarding Lambda: `lambda/guardduty_scan_forwarder/`
+- Cognito Pre Sign-up Lambda: `lambda/cognito_pre_signup/`
 
 ## AI Docs
 - Memory: `docs/ai/MEMORY.md`

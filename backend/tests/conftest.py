@@ -19,6 +19,7 @@ from app.models.job_document import JobDocument  # noqa: F401
 from app.models.job_activity import JobActivity  # noqa: F401
 from app.models.job_interview import JobInterview  # noqa: F401
 from app.models.saved_view import SavedView  # noqa: F401
+from app.models.email_verification_code import EmailVerificationCode  # noqa: F401
 
 from app.core.database import get_db
 
@@ -86,6 +87,13 @@ def _reset_mutable_settings():
         "ENABLE_RATE_LIMITING",
         "PASSWORD_MIN_LENGTH",
         "GUARD_DUTY_ENABLED",
+        "EMAIL_VERIFICATION_ENABLED",
+        "EMAIL_VERIFICATION_CODE_TTL_SECONDS",
+        "EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS",
+        "EMAIL_VERIFICATION_MAX_ATTEMPTS",
+        "RESEND_API_KEY",
+        "RESEND_FROM_EMAIL",
+        "FRONTEND_BASE_URL",
     ]
     original = {k: getattr(app_config.settings, k) for k in keys}
     try:
@@ -105,6 +113,9 @@ def app(db_session, monkeypatch):
     app_config.settings.COGNITO_APP_CLIENT_ID = app_config.settings.COGNITO_APP_CLIENT_ID or "test-client-id"
     app_config.settings.COGNITO_JWKS_CACHE_SECONDS = 60
     app_config.settings.ENABLE_RATE_LIMITING = False
+    app_config.settings.RESEND_API_KEY = app_config.settings.RESEND_API_KEY or "test-resend-key"
+    app_config.settings.RESEND_FROM_EMAIL = app_config.settings.RESEND_FROM_EMAIL or "Job Tracker <noreply@example.test>"
+    app_config.settings.FRONTEND_BASE_URL = app_config.settings.FRONTEND_BASE_URL or "http://localhost:5173"
 
     # SlowAPI decorators bind at import time, so reload routes with latest settings.
     import app.routes.documents as documents_routes
@@ -117,6 +128,12 @@ def app(db_session, monkeypatch):
     def override_get_db():
         yield db_session
     fastapi_app.dependency_overrides[get_db] = override_get_db
+
+    from sqlalchemy.orm import sessionmaker
+    from app.middleware import identity as identity_middleware
+
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_session.bind)
+    identity_middleware.SessionLocal = TestingSessionLocal
 
     # Stub Cognito verification + profile lookups so tests do not call AWS.
     from app.auth import cognito as cognito_module
@@ -164,6 +181,7 @@ def users(db_session):
         cognito_sub="sub-test-user",
         auth_provider="cognito",
         is_active=True,
+        is_email_verified=True,
     )
     user_b = User(
         email="sub-other-user@example.test",
@@ -171,6 +189,7 @@ def users(db_session):
         cognito_sub="sub-other-user",
         auth_provider="cognito",
         is_active=True,
+        is_email_verified=True,
     )
     db_session.add_all([user_a, user_b])
     db_session.commit()

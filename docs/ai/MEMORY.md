@@ -7,9 +7,10 @@ Keep it concise, factual, and employer-facing.
 ## Current Implementation Status
 ### Frontend (`frontend-web/`)
 - App shell with responsive nav and account menu.
-- Auth pages: Login / Register / Verify (verify is auto-only via email link).
+- Auth pages: Login / Register / Verify (verify page triggers resend/confirm without needing to log in first).
 - Register page embeds Cloudflare Turnstile (invisible/managed mode). Tokens are fetched/reset per submit and appended to the `/auth/cognito/signup` payload.
-- Cognito currently relies on the default Cognito email sender (verification/reset emails come from AWS). Custom email plans were removed until future trigger work is re-scoped.
+- Cognito currently relies on the default Cognito email sender (verification/reset emails come from AWS). A Pre Sign-up Lambda auto-confirms users and keeps Cognito from sending codes while we prep a future custom email flow; the SPA routes new signups straight to `/verify` so they can request/confirm the Resend code before logging in.
+- The backend now enforces email verification via `/auth/cognito/verification/{send,confirm}` (hashed 6-digit codes, TTL, cooldown, Resend delivery). Middleware blocks everything except the verification endpoints/logout/`GET /users/me` until `users.is_email_verified` is true. Successful confirmation also calls Cognito `AdminUpdateUserAttributes` with `Username=cognito_sub` so `email_verified=true` propagates to AWS/iOS clients.
 - Register + Change Password now share a password policy helper and inline `PasswordRequirements` list to block weak passwords before submission; backend error violations render in the UI.
 - Jobs page:
   - Server-side search + filters (q, tags, multi-select statuses)
@@ -36,6 +37,8 @@ Keep it concise, factual, and employer-facing.
 - Settings stored on user with `/users/me/settings` GET/PUT:
   - `auto_refresh_seconds`, `theme`, `default_jobs_sort`, `default_jobs_view`, `data_retention_days`
 - Email delivery / verification:
+  - `/auth/cognito/verification/send` and `/confirm` are public (no login required). Codes are salted SHA-256 hashes with TTL/cooldown/attempt caps, delivered via Resend (`RESEND_API_KEY`, `RESEND_FROM_EMAIL`).
+  - Identity middleware blocks all other APIs with `403 EMAIL_NOT_VERIFIED` until `users.is_email_verified` is true; confirmation also calls Cognito `AdminUpdateUserAttributes` (`Username=cognito_sub`, `email_verified=true`).
 - Password policy:
   - `PASSWORD_MIN_LENGTH` (default 14) enforced at signup via `ensure_strong_password`. Requirements: length, upper/lowercase, number, special char, no email/name substrings, denylist.
 - Database access:
@@ -88,6 +91,8 @@ Keep it concise, factual, and employer-facing.
 
 ## Recent Changes (High Signal)
 - Chunk 9 (rolled back): Cognito Custom Message Lambda removed; Cognito default emails restored while a new plan is evaluated.
+- Chunk 10: Added Pre Sign-up Lambda (auto-confirm, disable `autoVerifyEmail`) so signup doesn’t depend on Cognito email codes.
+- Chunk 11: App-enforced verification (hashed codes in DB, Resend delivery, Cognito admin sync, middleware 403) with updated frontend flow (signup redirects to `/verify`, public resend/confirm endpoints, redirect on 403 `EMAIL_NOT_VERIFIED`).
 - Chunk 8: Signup is now protected by Cloudflare Turnstile (`turnstile_token` field, backend verification, new env vars). Tests cover success/failure/missing token paths.
 - TypeScript migration completed for `frontend-web/` (`tsc --noEmit` passes; `allowJs=false`; no JS/JSX in `src/`).
 - Feature buildout completed: statuses/pipeline, saved views, search/filters, tags, timeline, interviews.

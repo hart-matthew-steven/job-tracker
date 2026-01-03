@@ -44,7 +44,7 @@ Primary goals:
 - `Identity` middleware verifies every request, attaches the DB user (JIT provisioning on first login), and exposes debug endpoints (`/auth/debug/token-info`, `/auth/debug/identity`) for local use.
 - User model now contains only Cognito-backed fields (`email`, `name`, `cognito_sub`, `auth_provider`). Legacy password/verification columns were removed in the `cognito_cutover_cleanup` migration.
 - Signup is protected by Cloudflare Turnstile (Chunk 8). `/auth/cognito/signup` requires `turnstile_token`; the backend posts tokens to Cloudflare’s `/siteverify`, fails closed if configuration is missing, and never logs secrets/tokens. CAPTCHA is enforced only on signup.
-- Cognito handles verification/reset emails directly for now (default Cognito sender). Plans for custom emails will be revisited in a future chunk.
+- Cognito handles reset emails via its default sender. Pre Sign-up Lambda auto-confirms users, while the backend now enforces verification via public endpoints (`/auth/cognito/verification/{send,confirm}`): signup redirects straight to `/verify`, users request/confirm 6-digit codes before their first login, and any user who does log in early is still blocked with `403 EMAIL_NOT_VERIFIED` until the flow completes. Codes are hashed (salted SHA-256), TTL/cooldown/attempt limits apply, Resend delivers the email, and we sync `email_verified=true` via `AdminUpdateUserAttributes`.
 - Tokens:
   - Access/id tokens live in memory + `sessionStorage`.
   - Refresh tokens are stored in `sessionStorage` only; refreshes go through `/auth/cognito/refresh` (Cognito `REFRESH_TOKEN_AUTH`).

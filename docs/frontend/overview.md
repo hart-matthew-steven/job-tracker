@@ -31,6 +31,7 @@ Recommended organization:
 - `src/pages/` for route-level views
 - `src/pages/account/` for account/profile/settings screens
 - `src/pages/auth/` for login/register/confirm/MFA (Cognito flow)
+- `src/pages/auth/VerifyEmailPage.tsx` handles the Resend code flow; it can be reached with or without a Cognito session immediately after signup.
 - `src/routes/` for route path constants
 - `src/components/` for reusable UI components
 - `src/components/jobs/` for job-related UI (list/detail/notes)

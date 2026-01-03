@@ -8,6 +8,9 @@ import type {
   CognitoSignupIn,
   CognitoConfirmIn,
   CognitoRefreshIn,
+  EmailVerificationSendIn,
+  EmailVerificationConfirmIn,
+  EmailVerificationSendOut,
 } from "../types/api";
 
 function jsonOptions(body: unknown) {
@@ -48,5 +51,13 @@ export function cognitoRefresh(payload: CognitoRefreshIn): Promise<CognitoAuthRe
 
 export function cognitoLogout(): Promise<void> {
   return requestVoid("/auth/cognito/logout", { method: "POST" });
+}
+
+export function sendEmailVerificationCode(payload: EmailVerificationSendIn): Promise<EmailVerificationSendOut> {
+  return requestJson<EmailVerificationSendOut>("/auth/cognito/verification/send", jsonOptions(payload));
+}
+
+export function confirmEmailVerificationCode(payload: EmailVerificationConfirmIn): Promise<CognitoMessage> {
+  return requestJson<CognitoMessage>("/auth/cognito/verification/confirm", jsonOptions(payload));
 }
 

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -10,6 +13,8 @@ from app.schemas.auth_cognito import (
     CognitoAuthResponse,
     CognitoChallengeIn,
     CognitoConfirmIn,
+    EmailVerificationConfirmIn,
+    EmailVerificationSendIn,
     CognitoLoginIn,
     CognitoMessage,
     CognitoMfaSetupIn,
@@ -18,12 +23,14 @@ from app.schemas.auth_cognito import (
     CognitoSecretOut,
     CognitoSignupIn,
     CognitoTokens,
+    EmailVerificationSendOut,
 )
 from app.core.rate_limit import limiter
 from app.services.cognito_client import (
     CognitoClientError,
     build_otpauth_uri,
     cognito_associate_software_token,
+    cognito_admin_mark_email_verified,
     cognito_confirm_sign_up,
     cognito_get_user,
     cognito_initiate_auth,
@@ -37,8 +44,12 @@ from app.services.turnstile import (
     TurnstileVerificationError,
     verify_turnstile_token,
 )
-from app.services.users import ensure_cognito_user
+from app.services.email_verification import send_code as send_verification_code, validate_code as validate_verification_code
+from app.services.users import ensure_cognito_user, get_user_by_email
+from app.models.user import User
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth/cognito", tags=["auth", "cognito"])
 
@@ -57,6 +68,8 @@ CHALLENGE_MESSAGE_MAP = {
     "CUSTOM_CHALLENGE": "Complete the custom challenge to continue.",
     "UNKNOWN": CHALLENGE_DEFAULT_MESSAGE,
 }
+
+GENERIC_VERIFICATION_RESPONSE = "If the account exists, a verification code has been sent."
 
 
 def _translate_cognito_error(exc: CognitoClientError) -> HTTPException:
@@ -122,6 +135,17 @@ def _challenge_response(
     )
 
 
+def _normalize_email(value: str) -> str:
+    return (value or "").strip().lower()
+
+
+def _require_valid_email(value: str) -> str:
+    normalized = _normalize_email(value)
+    if not normalized or "@" not in normalized:
+        raise HTTPException(status_code=400, detail="Valid email address required.")
+    return normalized
+
+
 def _build_token_payload(authentication: dict, *, fallback_refresh: str | None = None) -> CognitoTokens:
     access_token = authentication.get("AccessToken")
     if not access_token:
@@ -168,7 +192,11 @@ def _handle_auth_result(
 
 @router.post("/signup", response_model=CognitoMessage)
 @limiter.limit("5/minute")
-def cognito_signup(request: Request, payload: CognitoSignupIn):
+def cognito_signup(
+    request: Request,
+    payload: CognitoSignupIn,
+    db: Session = Depends(get_db),
+):
     ensure_strong_password(payload.password, email=payload.email, username=payload.name)
 
     if not settings.TURNSTILE_SITE_KEY or not settings.TURNSTILE_SECRET_KEY:
@@ -196,8 +224,31 @@ def cognito_signup(request: Request, payload: CognitoSignupIn):
     except CognitoClientError as exc:
         raise _translate_cognito_error(exc)
 
+    provisioned_user: User | None = None
+    user_sub = resp.get("UserSub")
+    if user_sub:
+        try:
+            provisioned_user = ensure_cognito_user(
+                db,
+                cognito_sub=user_sub,
+                email=payload.email,
+                name=payload.name,
+            )
+        except ValueError as exc:
+            logger.warning("Unable to ensure Cognito user after signup: %s", exc)
+
+    if settings.EMAIL_VERIFICATION_ENABLED and provisioned_user:
+        try:
+            send_verification_code(db, user=provisioned_user)
+        except HTTPException as exc:
+            detail = getattr(exc, "detail", str(exc))
+            logger.warning("Auto-send verification email failed: %s", detail)
+
     status = "OK" if resp.get("UserConfirmed") else "CONFIRMATION_REQUIRED"
-    message = "Confirmation code sent to email." if status == "CONFIRMATION_REQUIRED" else "Signup successful."
+    if settings.EMAIL_VERIFICATION_ENABLED:
+        message = "Account created. Enter the verification code we emailed you."
+    else:
+        message = "Confirmation code sent to email." if status == "CONFIRMATION_REQUIRED" else "Signup successful."
     return CognitoMessage(status=status, message=message)
 
 
@@ -310,6 +361,79 @@ def cognito_mfa_verify(
         db=db,
         fallback_email=payload.email,
     )
+
+
+@router.post("/verification/send", response_model=EmailVerificationSendOut)
+@limiter.limit("6/minute")
+def send_verification_code_route(
+    request: Request,
+    payload: EmailVerificationSendIn,
+    db: Session = Depends(get_db),
+):
+    if not settings.EMAIL_VERIFICATION_ENABLED:
+        return CognitoMessage(status="OK", message="Email verification is disabled.")
+
+    normalized_email = _require_valid_email(payload.email)
+    user = get_user_by_email(db, normalized_email)
+    if not user:
+        return EmailVerificationSendOut(status="OK", message=GENERIC_VERIFICATION_RESPONSE)
+
+    if user.is_email_verified:
+        return EmailVerificationSendOut(status="OK", message="Email is already verified.")
+
+    record = send_verification_code(db, user=user)
+    cooldown_seconds = max(
+        0, int((record.resend_available_at - datetime.now(timezone.utc)).total_seconds())
+    )
+    return EmailVerificationSendOut(
+        status="OK",
+        message="Verification code sent.",
+        resend_available_in_seconds=cooldown_seconds,
+    )
+
+
+@router.post("/verification/confirm", response_model=CognitoMessage)
+@limiter.limit("10/minute")
+def confirm_verification_code(
+    request: Request,
+    payload: EmailVerificationConfirmIn,
+    db: Session = Depends(get_db),
+):
+    if not settings.EMAIL_VERIFICATION_ENABLED:
+        return CognitoMessage(status="OK", message="Email verification is disabled.")
+
+    normalized_email = _require_valid_email(payload.email)
+    user = get_user_by_email(db, normalized_email)
+    if not user:
+        raise HTTPException(status_code=400, detail="Verification code not found. Request a new one.")
+
+    if user.is_email_verified:
+        return CognitoMessage(status="OK", message="Email is already verified.")
+
+    record = validate_verification_code(db, user=user, code=payload.code)
+
+    try:
+        cognito_admin_mark_email_verified(cognito_sub=user.cognito_sub, email=user.email)
+    except CognitoClientError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to update Cognito user attributes. Please try again in a moment.",
+        ) from exc
+
+    now = datetime.now(timezone.utc)
+    db_user = (
+        db.query(User)
+        .filter(User.id == user.id)
+        .with_for_update()
+        .one()
+    )
+    db_user.is_email_verified = True
+    db_user.email_verified_at = now
+    record.updated_at = now
+    db.commit()
+
+    return CognitoMessage(status="OK", message="Email verified. You can continue using the app.")
 
 
 @router.post("/refresh", response_model=CognitoAuthResponse)

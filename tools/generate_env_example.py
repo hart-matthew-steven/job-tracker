@@ -42,6 +42,7 @@ ALLOWED_PREFIXES = (
     "DB_",
     "COGNITO_",
     "EMAIL_",
+    "RESEND_",
     "CORS_",
     "ENABLE_",
     "DOC_",
@@ -49,6 +50,7 @@ ALLOWED_PREFIXES = (
     "PASSWORD_",
     "GUARD_",
     "TURNSTILE_",
+    "FRONTEND_",
 )
 
 ALLOWED_EXACT = {"ENV"}
@@ -93,6 +95,19 @@ GROUPS: list[Group] = [
     Group("Uploads", "Upload guardrails (max file size etc.).", ("MAX_UPLOAD_BYTES", "MAX_PENDING_UPLOADS_PER_JOB")),
     Group("AWS (S3 uploads)", "S3 bucket + prefix for document uploads.", ("AWS_REGION", "S3_BUCKET_NAME", "S3_PREFIX")),
     Group("Internal callbacks", "Shared secret for internal Lambda callbacks.", ("DOC_SCAN_SHARED_SECRET",)),
+    Group(
+        "Email verification",
+        "Resend-powered verification codes.",
+        (
+            "EMAIL_VERIFICATION_ENABLED",
+            "EMAIL_VERIFICATION_CODE_TTL_SECONDS",
+            "EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS",
+            "EMAIL_VERIFICATION_MAX_ATTEMPTS",
+            "RESEND_API_KEY",
+            "RESEND_FROM_EMAIL",
+            "FRONTEND_BASE_URL",
+        ),
+    ),
 ]
 
 

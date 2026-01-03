@@ -65,9 +65,15 @@ Typical layout:
 
 ---
 
-## Email delivery
+## Email delivery & verification
 
-Cognito currently sends verification/reset emails via its default managed email service. FastAPI has no direct SMTP/SES/Resend integration; future chunks may reintroduce a custom sender once requirements are finalized.
+- Cognito currently sends only reset/notification emails via its default managed sender.
+- Pre Sign-up Lambda (`lambda/cognito_pre_signup/`) auto-confirms users, which keeps Cognito from sending “confirm your account” emails.
+- The backend now enforces email verification itself:
+  - `email_verification_codes` table stores salted hashes, TTL, resend cooldown, attempt counts.
+  - `POST /auth/cognito/verification/send` is a public, rate-limited endpoint that generates a 6-digit code and emails it via Resend (`RESEND_API_KEY`, `RESEND_FROM_EMAIL`).
+  - `POST /auth/cognito/verification/confirm` validates the code, sets `users.is_email_verified` + `email_verified_at`, and calls Cognito `AdminUpdateUserAttributes` with `Username = cognito_sub` so AWS reflects the same state.
+  - Middleware blocks all other APIs with `403 EMAIL_NOT_VERIFIED` until the DB flag is true (verification endpoints, logout, and `GET /users/me` are allowed so the UI can finish the flow).
 
 ---
 

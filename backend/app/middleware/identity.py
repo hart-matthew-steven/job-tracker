@@ -22,18 +22,46 @@ AUTH_BYPASS_PATHS = frozenset(
     ]
 )
 
+AUTH_PROTECTED_PREFIXES: tuple[str, ...] = tuple()
+
 AUTH_BYPASS_PREFIXES = (
     "/auth/cognito",  # Public Cognito API routes
     "/auth/debug",  # Explicitly gated debug endpoints (dev-only)
+)
+
+EMAIL_VERIFICATION_ALLOWED_PATHS = frozenset(
+    [
+        "/auth/cognito/verification/send",
+        "/auth/cognito/verification/confirm",
+        "/auth/cognito/logout",
+        "/users/me",
+    ]
+)
+
+EMAIL_VERIFICATION_ALLOWED_PREFIXES = (
+    "/auth/debug",
 )
 
 
 def _is_auth_bypass_path(path: str) -> bool:
     """Check if a path should bypass authentication."""
     path = path.rstrip("/")
+    if any(path.startswith(prefix) for prefix in AUTH_PROTECTED_PREFIXES):
+        return False
     if path in AUTH_BYPASS_PATHS:
         return True
     return any(path.startswith(prefix) for prefix in AUTH_BYPASS_PREFIXES)
+
+
+def _is_email_verification_allowed(path: str, method: str) -> bool:
+    if path in EMAIL_VERIFICATION_ALLOWED_PATHS:
+        return True
+    if any(path.startswith(prefix) for prefix in EMAIL_VERIFICATION_ALLOWED_PREFIXES):
+        return True
+    # Allow GET /users/me even if trailing slash omitted
+    if path.startswith("/users/me") and method == "GET":
+        return True
+    return False
 
 
 def _is_guard_duty_callback(request: Request) -> bool:
@@ -196,6 +224,17 @@ def register_identity_middleware(app: FastAPI) -> None:
                 raw_claims=claims,
                 linked_user_id=str(user.id),
             )
+
+            if settings.EMAIL_VERIFICATION_ENABLED and not getattr(user, "is_email_verified", False):
+                if not _is_email_verification_allowed(path, request.method.upper()):
+                    return JSONResponse(
+                        status_code=403,
+                        content={
+                            "error": "EMAIL_NOT_VERIFIED",
+                            "message": "Verify your email to continue.",
+                            "details": {"code": "EMAIL_NOT_VERIFIED", "email": user.email},
+                        },
+                    )
         except ValueError as exc:
             logger.error("Cognito user provisioning failed: %s", exc)
             return JSONResponse(

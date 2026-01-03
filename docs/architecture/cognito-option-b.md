@@ -60,6 +60,8 @@
 - **Name is mandatory**: `users.name` is NOT NULL, enforced at signup (both custom and Cognito flows).
 - **JIT provisioning**: `ensure_cognito_user` creates a user if `cognito_sub` not known; rejects silent linking if an email already exists.
 - **MFA**: Because Cognito is configured for required TOTP, every login flows through the backend challenge contract. The SPA never needs AWS credentials or to know Cognito challenge semantics.
+- **Pre Sign-up Lambda**: `lambda/cognito_pre_signup/` auto-confirms users and keeps `autoVerifyEmail=false` so the product can own verification flows later without Cognito emails firing.
+- **App-enforced email verification**: `/auth/cognito/verification/send` + `/auth/cognito/verification/confirm` are public so users can verify before their first login; they manage hashed codes in our DB, deliver via Resend, and call `AdminUpdateUserAttributes` (`Username=cognito_sub`) so Cognito reflects the same `email_verified` state.
 
 ## Files
 

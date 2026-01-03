@@ -38,7 +38,7 @@ npm run dev
 ### Auth & MFA flow (Chunk 7)
 
 1. `/register` → `POST /auth/cognito/signup` (payload includes `turnstile_token`)
-2. `/verify` → `POST /auth/cognito/confirm`
+2. `/verify` → screen that calls `/auth/cognito/verification/send` (resend button) and `/auth/cognito/verification/confirm`. Both endpoints are public so users can finish verification before logging in. Legacy `/auth/cognito/confirm` exists only for fallback migrations.
 3. `/login` → `POST /auth/cognito/login`
    - `status=OK` → store the Job Tracker access token in sessionStorage and proceed
    - `status=CHALLENGE` + `MFA_SETUP` → `/mfa/setup` → `/auth/cognito/mfa/setup` + `/auth/cognito/mfa/verify`

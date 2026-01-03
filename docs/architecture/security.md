@@ -260,6 +260,8 @@ Work is delivered as incremental chunks:
   - Legacy tables (`refresh_tokens`, `email_verification_tokens`, password metadata) removed via `cognito_cutover_cleanup`.
   - Rate limiting + logging tightened around `/auth/cognito/*`.
 - **Chunk 8** (completed): Cloudflare Turnstile bot protection on signup (invisible/managed widget + backend verification).
+- **Chunk 10** (completed): Added Pre Sign-up Lambda that auto-confirms users and disables Cognito email verification so signup doesn’t depend on Cognito emails during the migration.
+- **Chunk 11** (completed): App-enforced email verification (hashed codes, TTL, cooldown, Resend delivery, Cognito `AdminUpdateUserAttributes` sync) with public `/auth/cognito/verification/{send,confirm}` endpoints so users can verify before their first login; middleware still blocks unverified authenticated requests with `403 EMAIL_NOT_VERIFIED`.
 - Future work: passkeys, native iOS auth screens, AI usage/billing gates.
 
 ### Guardrails

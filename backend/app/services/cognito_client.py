@@ -7,7 +7,7 @@ without leaking boto3-specific errors up the stack.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any, Dict
+from typing import Any, Dict, List
 from urllib.parse import quote
 
 import boto3
@@ -24,16 +24,18 @@ class CognitoClientError(Exception):
         self.code = code
 
 
-def _require_cognito_client_config() -> None:
+def _require_cognito_client_config(require_user_pool: bool = False) -> None:
     if not settings.COGNITO_REGION:
         raise RuntimeError("COGNITO_REGION is not configured")
     if not settings.COGNITO_APP_CLIENT_ID:
         raise RuntimeError("COGNITO_APP_CLIENT_ID is not configured")
+    if require_user_pool and not settings.COGNITO_USER_POOL_ID:
+        raise RuntimeError("COGNITO_USER_POOL_ID is not configured")
 
 
 @lru_cache(maxsize=1)
-def _get_cognito_client():
-    _require_cognito_client_config()
+def _get_cognito_client(require_user_pool: bool = False):
+    _require_cognito_client_config(require_user_pool=require_user_pool)
     return boto3.client("cognito-idp", region_name=settings.COGNITO_REGION)
 
 
@@ -204,5 +206,27 @@ def build_otpauth_uri(secret_code: str, email: str | None = None) -> str:
     safe_label = quote(label)
     safe_issuer = quote(issuer)
     return f"otpauth://totp/{safe_label}?secret={secret_code}&issuer={safe_issuer}"
+
+
+def cognito_admin_mark_email_verified(*, cognito_sub: str, email: str | None = None) -> None:
+    """Mark a Cognito user as email-verified via the AdminUpdateUserAttributes API."""
+    if not cognito_sub:
+        raise ValueError("cognito_sub is required to update Cognito attributes")
+
+    client = _get_cognito_client(require_user_pool=True)
+    attributes: List[dict[str, str]] = [
+        {"Name": "email_verified", "Value": "true"},
+    ]
+    if email:
+        attributes.append({"Name": "email", "Value": email})
+
+    try:
+        client.admin_update_user_attributes(
+            UserPoolId=settings.COGNITO_USER_POOL_ID,
+            Username=cognito_sub,
+            UserAttributes=attributes,
+        )
+    except ClientError as exc:
+        raise _translate_error(exc) from exc
 
 

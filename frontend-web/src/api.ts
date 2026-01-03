@@ -34,9 +34,17 @@ import {
 type LogoutListener = () => void;
 const logoutListeners = new Set<LogoutListener>();
 
+type EmailVerificationListener = (data?: { email?: string }) => void;
+const emailVerificationListeners = new Set<EmailVerificationListener>();
+
 export function subscribeToUnauthorizedLogout(listener: LogoutListener): () => void {
   logoutListeners.add(listener);
   return () => logoutListeners.delete(listener);
+}
+
+export function subscribeToEmailVerificationRequired(listener: EmailVerificationListener): () => void {
+  emailVerificationListeners.add(listener);
+  return () => emailVerificationListeners.delete(listener);
 }
 
 function notifyUnauthorizedLogout() {
@@ -56,6 +64,7 @@ export function logout(): void {
 function requiresAuth(path: string): boolean {
   if (typeof path !== "string") return false;
   if (!path.startsWith("/")) return false;
+  if (path.startsWith("/auth/cognito/verification")) return false;
   return !path.startsWith("/auth/");
 }
 
@@ -141,6 +150,24 @@ export async function requestJson<T = unknown>(path: string, options: JsonReques
     }
 
     const { message, detail } = await parseError(res);
+    if (res.status === 403) {
+      const payload = (typeof detail === "object" && detail !== null ? (detail as Record<string, unknown>) : {}) as {
+        code?: string;
+        error?: string;
+        email?: string;
+      };
+      const code = (payload.code || payload.error || "").toString().toUpperCase();
+      if (code === "EMAIL_NOT_VERIFIED") {
+        emailVerificationListeners.forEach((fn) => {
+          try {
+            fn({ email: payload.email });
+          } catch {
+            // ignore listener errors
+          }
+        });
+      }
+    }
+
     const error = new Error(message) as Error & { detail?: unknown; status?: number };
     if (detail !== undefined) error.detail = detail;
     error.status = res.status;
@@ -188,6 +215,24 @@ export async function requestVoid(path: string, options: JsonRequestOptions = {}
 
   if (!res.ok) {
     const { message, detail } = await parseError(res);
+    if (res.status === 403) {
+      const payload = (typeof detail === "object" && detail !== null ? (detail as Record<string, unknown>) : {}) as {
+        code?: string;
+        error?: string;
+        email?: string;
+      };
+      const code = (payload.code || payload.error || "").toString().toUpperCase();
+      if (code === "EMAIL_NOT_VERIFIED") {
+        emailVerificationListeners.forEach((fn) => {
+          try {
+            fn({ email: payload.email });
+          } catch {
+            // ignore listener errors
+          }
+        });
+      }
+    }
+
     const error = new Error(message) as Error & { detail?: unknown; status?: number };
     if (detail !== undefined) error.detail = detail;
     error.status = res.status;

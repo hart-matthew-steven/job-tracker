@@ -49,9 +49,15 @@ Do not document secret values.
 - Password strength is enforced on registration/change/reset: min length, upper/lowercase, number, special char, denylist, and “no email/name in password”.
 - Rotation is governed by Cognito; the legacy `password_changed_at`/`must_change_password` flow was removed during the cutover.
 
-### Email configuration (backend)
+### Email verification (Resend)
 
-Email verification is handled by Cognito (and future custom flows will be implemented via Cognito triggers). No backend email provider configuration is required during local development.
+- App-enforced email verification relies on the Resend SDK. Set the following env vars locally (see `.env.example`):
+  - `EMAIL_VERIFICATION_ENABLED=true`
+  - `EMAIL_VERIFICATION_CODE_TTL_SECONDS`, `EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS`, `EMAIL_VERIFICATION_MAX_ATTEMPTS`
+  - `RESEND_API_KEY` (use a dev key) and `RESEND_FROM_EMAIL` (e.g., `Job Tracker <dev@jobapptracker.dev>`)
+  - `FRONTEND_BASE_URL` (defaults to `http://localhost:5173`)
+- Dev/testing can stub email delivery by pointing `RESEND_API_KEY` at a fake key and inspecting logs instead of sending live email.
+- The `/auth/cognito/verification/send` and `/confirm` endpoints are public so you can request/confirm codes before logging in. Rate limiting still applies; keep the cooldown in mind when testing.
 
 ---
 

@@ -54,6 +54,16 @@ Guidelines:
   - Body: `{ refresh_token }`
   - Notes: proxies Cognito `REFRESH_TOKEN_AUTH`, returns updated tokens
 
+- `POST /auth/cognito/verification/send`
+  - Auth: none (rate-limited; responds generically)
+  - Body: `{ email }`
+  - Notes: generates a 6-digit code, stores a salted hash, enforces TTL/cooldown, and emails the code via Resend.
+
+- `POST /auth/cognito/verification/confirm`
+  - Auth: none
+  - Body: `{ email, code }`
+  - Notes: validates code hash/TTL/attempts, sets `users.is_email_verified=true`, syncs `email_verified=true` back to Cognito (`Username=cognito_sub`).
+
 - `POST /auth/cognito/logout`
   - Auth: Bearer (optional)
   - Notes: best-effort API parity—clears SPA session; no server-side refresh store exists

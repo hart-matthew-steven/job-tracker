@@ -79,6 +79,20 @@ class Settings:
         self.COGNITO_JWKS_CACHE_SECONDS = int(os.getenv("COGNITO_JWKS_CACHE_SECONDS", "900"))
 
         # ----------------------------
+        # Email verification / Resend
+        # ----------------------------
+        self.EMAIL_VERIFICATION_ENABLED = str_to_bool(os.getenv("EMAIL_VERIFICATION_ENABLED", "false"))
+        self.EMAIL_VERIFICATION_CODE_TTL_SECONDS = int(os.getenv("EMAIL_VERIFICATION_CODE_TTL_SECONDS", "900"))
+        self.EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS = int(
+            os.getenv("EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS", "60")
+        )
+        self.EMAIL_VERIFICATION_MAX_ATTEMPTS = int(os.getenv("EMAIL_VERIFICATION_MAX_ATTEMPTS", "10"))
+        self.RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+        self.RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "").strip()
+        frontend_base = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173").strip()
+        self.FRONTEND_BASE_URL = frontend_base.rstrip("/") or "http://localhost:5173"
+
+        # ----------------------------
         # Bot protection
         # ----------------------------
         self.TURNSTILE_SITE_KEY = os.getenv("TURNSTILE_SITE_KEY", "").strip()
@@ -124,6 +138,13 @@ class Settings:
             missing.append("TURNSTILE_SITE_KEY")
         if not self.TURNSTILE_SECRET_KEY:
             missing.append("TURNSTILE_SECRET_KEY")
+        if self.EMAIL_VERIFICATION_ENABLED:
+            if not self.RESEND_API_KEY:
+                missing.append("RESEND_API_KEY")
+            if not self.RESEND_FROM_EMAIL:
+                missing.append("RESEND_FROM_EMAIL")
+            if not self.FRONTEND_BASE_URL or "localhost" in self.FRONTEND_BASE_URL:
+                raise RuntimeError("FRONTEND_BASE_URL must be set to the production domain when email verification is enabled.")
 
         # URLs should be explicitly set in prod
         if self.DB_SSLMODE != "require":

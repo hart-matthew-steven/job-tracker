@@ -257,6 +257,27 @@ Record decisions that affect structure or long-term direction.
   - `.env.example`, README, and `docs/ai/*` no longer mention Resend-trigger Lambda work; Cognito default emails are documented as the current state.
   - GuardDuty lambda and other services remain untouched.
 
+## 2026-01-06 — Cognito Pre Sign-up Lambda (Chunk 10)
+- Decision: Add a tiny Pre Sign-up Lambda that auto-confirms users and disables Cognito-managed email verification while we own verification out of band.
+- Rationale:
+  - Cognito’s default confirmation emails conflict with the planned Resend workflows.
+  - Auto-confirming keeps signup friction low and avoids support tickets for missing codes.
+- Consequences:
+  - New lambda under `lambda/cognito_pre_signup/` (container image, handler, README).
+  - Documentation updated (`README.md`, `docs/auth-cognito-pre-signup.md`, `docs/ai/*`).
+  - Lambda performs no network calls or secret access; it only flips response flags.
+
+## 2026-01-07 — App-enforced email verification (Chunk 11)
+- Decision: Store hashed verification codes in our DB, send via Resend, and block API access until users confirm the code.
+- Rationale:
+  - Cognito email confirmation was disabled by the Pre Sign-up Lambda; we still need a trustworthy verification state for AI billing/iOS parity.
+  - Owning the flow lets us throttle resend abuse, support custom templates, and keep DB + Cognito in sync.
+- Consequences:
+  - New table `email_verification_codes`, `users` regained `is_email_verified`/`email_verified_at`.
+  - Endpoints: `/auth/cognito/verification/send` and `/auth/cognito/verification/confirm` are public (rate-limited, salted SHA-256 hashes, TTL/cooldown). Signup links directly to `/verify` so users handle the code before their first login, but if they skip it the API still returns `403 EMAIL_NOT_VERIFIED`.
+  - Middleware blocks all other APIs with `403 EMAIL_NOT_VERIFIED` until the DB flag is true; verifying also calls Cognito `AdminUpdateUserAttributes` using `Username=cognito_sub`.
+  - Frontend exposes resend/cooldown UI on `/verify` and listens for `EMAIL_NOT_VERIFIED` responses to redirect back if someone logs in before completing the flow.
+
 ---
 
 ## 2025-12-18 — User settings persisted on users table

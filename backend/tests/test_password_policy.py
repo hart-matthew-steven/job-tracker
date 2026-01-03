@@ -4,7 +4,7 @@ from app.core.password_policy import ensure_strong_password, evaluate_password
 
 
 def test_evaluate_password_reports_all_violations():
-    violations = evaluate_password("password", email="user@example.com", username="User Example")
+    violations = evaluate_password("user", email="user@example.com", username="User")
     assert "min_length" in violations
     assert "uppercase" in violations
     assert "number" in violations

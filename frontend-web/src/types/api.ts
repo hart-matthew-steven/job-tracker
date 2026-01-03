@@ -31,6 +31,9 @@ export type CognitoChallengeRequest = {
 export type CognitoMfaSetupIn = { session: string; label?: string };
 export type CognitoMfaSetupOut = { secret_code: string; otpauth_uri?: string; session?: string | null };
 export type CognitoMfaVerifyIn = { email: string; session: string; code: string; friendly_name?: string };
+export type EmailVerificationSendIn = { email: string };
+export type EmailVerificationSendOut = { status?: string; message?: string; resend_available_in_seconds?: number };
+export type EmailVerificationConfirmIn = { email: string; code: string };
 
 // -------- Users / Settings --------
 export type UserMeOut = {
@@ -39,6 +42,8 @@ export type UserMeOut = {
   name?: string | null;
   auto_refresh_seconds: number;
   created_at: string;
+  is_email_verified: boolean;
+  email_verified_at?: string | null;
 };
 
 export type UserSettingsOut = {

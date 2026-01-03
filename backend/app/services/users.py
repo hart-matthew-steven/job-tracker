@@ -69,6 +69,8 @@ def provision_cognito_user(
         cognito_sub=cognito_sub,
         auth_provider="cognito",
         is_active=True,
+        is_email_verified=False,
+        email_verified_at=None,
     )
 
     db.add(user)

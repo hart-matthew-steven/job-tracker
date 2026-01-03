@@ -243,6 +243,39 @@ After the image is pushed, point the App Runner service at the new ECR tag (or u
    4. **Subsequent login** – `/auth/cognito/login` + `/auth/cognito/challenge` (SOFTWARE_TOKEN_MFA).
    5. **API calls** – SPA automatically attaches the Cognito access token to every request.
 
+## Cognito Pre Sign-up Lambda
+
+- Folder: `lambda/cognito_pre_signup/`
+- Purpose: attached to the Cognito **Pre Sign-up** trigger so Cognito auto-confirms new users and skips its built-in verification emails. This keeps email ownership on our side for future Resend-based flows.
+- Behavior: sets `autoConfirmUser=true` and `autoVerifyEmail=false` for supported trigger sources (`PreSignUp_SignUp`, `PreSignUp_AdminCreateUser`) and logs the trigger.
+- No network calls, secrets, or external services. See the lambda README for build/push instructions and attach steps.
+
+## Email verification (app-enforced)
+
+- Cognito accounts are auto-confirmed, but the backend blocks all protected APIs with `403 EMAIL_NOT_VERIFIED` while `users.is_email_verified = false`.
+- Signup automatically triggers the first verification email, so the `/verify` screen shows “code sent” and honors the resend cooldown before re-hitting the backend.
+- Endpoints:
+  - `POST /auth/cognito/verification/send` → throttled, public endpoint; generates a 6-digit code (hash + TTL) and emails it via Resend.
+  - `POST /auth/cognito/verification/confirm` → validates the code, marks the DB record verified, and calls Cognito `AdminUpdateUserAttributes` with `Username=cognito_sub` / `email_verified=true`.
+- Config knobs (see `.env.example`): `EMAIL_VERIFICATION_ENABLED`, `EMAIL_VERIFICATION_CODE_TTL_SECONDS`, `EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS`, `EMAIL_VERIFICATION_MAX_ATTEMPTS`, `RESEND_FROM_EMAIL`.
+- Docs: `docs/auth-email-verification.md` (flow details, security notes, testing steps).
+
+## Email Verification (App-enforced)
+
+- Why: Cognito no longer sends confirmation emails (Pre Sign-up Lambda auto-confirms), but we still need trusted verification for AI billing and iOS parity. The app now owns verification end-to-end.
+- Backend:
+  - Config (`.env.example`): `EMAIL_VERIFICATION_ENABLED`, `EMAIL_VERIFICATION_CODE_TTL_SECONDS`, `EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS`, `EMAIL_VERIFICATION_MAX_ATTEMPTS`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `FRONTEND_BASE_URL`.
+  - Table `email_verification_codes` stores salted+hashed codes, TTL, attempts, resend cooldown.
+  - Endpoints:
+    - `POST /auth/cognito/verification/send` (public but rate limited) – generates a 6-digit code, stores hash, sends via Resend.
+    - `POST /auth/cognito/verification/confirm` – validates code, marks `users.is_email_verified=true`, syncs `email_verified=true` back to Cognito using `Username=cognito_sub`.
+  - Middleware blocks all other APIs with `403 EMAIL_NOT_VERIFIED` until the DB flag is true (only verification endpoints, logout, and `GET /users/me` stay open).
+- Frontend:
+  - Login fetches `/users/me`; if unverified it automatically requests a code and routes to `/verify`.
+  - `/verify` screen allows resend (default 60s cooldown) and confirmation.
+  - Any 403 EMAIL_NOT_VERIFIED automatically redirects back to `/verify`.
+- Resend: Uses the official Python SDK; no raw codes logged. Emails are short, code-only, and mention the 15-minute expiry.
+
 ### Refresh flow testing
 
 The login response includes `refresh_token`. To test refresh manually:
@@ -388,7 +421,7 @@ This repo includes a generated `backend/.env.example` (**names only**, no values
 - Rotation-specific fields (`password_changed_at`, `PASSWORD_MAX_AGE_DAYS`, `must_change_password`) were removed once Cognito became the sole auth provider; future rotation is governed by Cognito policies.
 - The backend is the source of truth; the frontend mirrors the rules for UX-only validation.
 
-- Email verification/notifications are handled by Cognito (and, in the future, a Cognito-triggered Lambda that talks to Resend directly). No backend email configuration is required.
+- Email verification is enforced by the app: after signup we route users to `/verify` to request/confirm a 6-digit code via Resend (`/auth/cognito/verification/send` + `/auth/cognito/verification/confirm`). If someone tries to log in before verifying, every protected API still returns `403 EMAIL_NOT_VERIFIED` and the UI redirects back to `/verify`. Once verified, the backend marks `users.is_email_verified = true` and syncs `email_verified=true` to Cognito via `AdminUpdateUserAttributes` so native clients stay in sync. Settings + flow docs live in `docs/auth-email-verification.md`.
 
 ## Design Principles
 

@@ -26,6 +26,21 @@ class CognitoConfirmIn(BaseModel):
     code: constr(min_length=1, max_length=10)
 
 
+class EmailVerificationSendIn(BaseModel):
+    email: constr(min_length=3)
+
+
+class EmailVerificationSendOut(BaseModel):
+    status: str = "OK"
+    message: str | None = None
+    resend_available_in_seconds: int | None = None
+
+
+class EmailVerificationConfirmIn(BaseModel):
+    email: constr(min_length=3)
+    code: constr(min_length=6, max_length=6)
+
+
 class CognitoLoginIn(BaseModel):
     email: EmailStr
     password: constr(min_length=8)

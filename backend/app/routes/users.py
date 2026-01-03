@@ -20,6 +20,8 @@ def get_me(user: User = Depends(get_current_user)) -> UserMeOut:
         name=user.name,
         auto_refresh_seconds=user.auto_refresh_seconds,
         created_at=user.created_at,
+        is_email_verified=getattr(user, "is_email_verified", False),
+        email_verified_at=getattr(user, "email_verified_at", None),
     )
 
 

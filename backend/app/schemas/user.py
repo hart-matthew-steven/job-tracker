@@ -11,6 +11,8 @@ class UserMeOut(BaseModel):
     name: str | None = None
     auto_refresh_seconds: int
     created_at: datetime
+    is_email_verified: bool
+    email_verified_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

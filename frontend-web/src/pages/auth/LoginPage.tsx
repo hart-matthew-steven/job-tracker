@@ -3,11 +3,12 @@ import { useMemo, useState } from "react";
 import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
 import type { FormEvent } from "react";
 
-import { cognitoLogin } from "../../api/authCognito";
+import { cognitoLogin, sendEmailVerificationCode } from "../../api/authCognito";
 import { useAuth } from "../../auth/AuthProvider";
 import { useToast } from "../../components/ui/toast";
 import { ROUTES } from "../../routes/paths";
 import type { CognitoTokens } from "../../types/api";
+import { getCurrentUser } from "../../api";
 
 function safeNext(nextRaw: string | null) {
   const v = (nextRaw || "").trim();
@@ -31,11 +32,22 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  function completeLogin(tokens: CognitoTokens | null | undefined) {
+  async function completeLogin(tokens: CognitoTokens | null | undefined, normalizedEmail: string) {
     if (!tokens?.access_token) {
       throw new Error("Login did not return an access token.");
     }
     setSession(tokens);
+    try {
+      const me = await getCurrentUser();
+      if (!me.is_email_verified) {
+        await sendEmailVerificationCode({ email: me.email });
+        const params = new URLSearchParams({ email: me.email, next });
+        nav(`${ROUTES.verify}?${params.toString()}`, { replace: true });
+        return;
+      }
+    } catch (err) {
+      console.error("Unable to fetch verification status:", err);
+    }
     nav(next, { replace: true });
   }
 
@@ -49,7 +61,7 @@ export default function LoginPage() {
       const res = await cognitoLogin(normalizedEmail, password);
 
       if (res.status === "OK") {
-        completeLogin(res.tokens);
+        await completeLogin(res.tokens, normalizedEmail);
         return;
       }
 

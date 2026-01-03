@@ -221,7 +221,11 @@ export default function RegisterPage() {
           : res?.message ?? "Account created.";
       setMessage(successMessage);
       toast.success(successMessage, "Register");
-      nav(`/verify?email=${encodeURIComponent(eEmail)}&next=${encodeURIComponent(next)}`, { replace: true });
+      const params = new URLSearchParams();
+      params.set("email", eEmail);
+      params.set("next", next);
+      params.set("sent", "1");
+      nav(`/verify?${params.toString()}`, { replace: true });
     } catch (err) {
       const apiErr = err as { message?: string; detail?: { code?: string; violations?: string[] } } | null;
       if (apiErr?.detail && apiErr.detail.code === "WEAK_PASSWORD") {
@@ -363,8 +367,8 @@ export default function RegisterPage() {
       </div>
 
       <div className="text-xs text-slate-500 dark:text-slate-400">
-        After registration, check your inbox (and spam) for the Cognito verification code. Keep this page open so you can
-        enter the code immediately.
+        After registration we’ll email you a 6-digit verification code. Enter it on the next screen to activate your account,
+        then sign in to continue.
       </div>
     </div>
   );
