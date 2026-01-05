@@ -43,18 +43,25 @@ def get_my_settings(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def _load_user_in_session(db: Session, user: User) -> User:
+    db_user = db.get(User, user.id)
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return db_user
+
+
 @router.put("/me/settings", response_model=MessageOut)
 def update_my_settings(
     payload: UpdateSettingsIn,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    user.auto_refresh_seconds = int(payload.auto_refresh_seconds or 0)
-    user.theme = (payload.theme or "dark").strip().lower() or "dark"
-    user.default_jobs_sort = (payload.default_jobs_sort or "updated_desc").strip() or "updated_desc"
-    user.default_jobs_view = (payload.default_jobs_view or "all").strip().lower() or "all"
-    user.data_retention_days = int(payload.data_retention_days or 0)
-    db.add(user)
+    db_user = _load_user_in_session(db, user)
+    db_user.auto_refresh_seconds = int(payload.auto_refresh_seconds or 0)
+    db_user.theme = (payload.theme or "dark").strip().lower() or "dark"
+    db_user.default_jobs_sort = (payload.default_jobs_sort or "updated_desc").strip() or "updated_desc"
+    db_user.default_jobs_view = (payload.default_jobs_view or "all").strip().lower() or "all"
+    db_user.data_retention_days = int(payload.data_retention_days or 0)
     db.commit()
     return {"message": "Settings updated"}
 
@@ -65,16 +72,16 @@ def update_ui_preferences(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> UiPreferencesOut:
-    prefs = dict(getattr(user, "ui_preferences", {}) or {})
+    db_user = _load_user_in_session(db, user)
+    prefs = dict(getattr(db_user, "ui_preferences", {}) or {})
     for key, value in payload.preferences.items():
         if key not in UI_COLLAPSE_PREF_KEYS:
             raise HTTPException(status_code=400, detail=f"Unknown preference key: {key}")
         prefs[key] = bool(value)
 
-    user.ui_preferences = prefs
-    db.add(user)
+    db_user.ui_preferences = prefs
     db.commit()
-    db.refresh(user)
+    db.refresh(db_user)
     return UiPreferencesOut(ui_preferences=prefs)
 
 

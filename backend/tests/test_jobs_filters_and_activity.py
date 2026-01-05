@@ -54,7 +54,8 @@ def test_job_status_and_tags_updates_log_activity(client):
 
     res3 = client.get(f"/jobs/{job['id']}/activity")
     assert res3.status_code == 200
-    types = [ev["type"] for ev in res3.json()]
+    payload = res3.json()
+    types = [ev["type"] for ev in payload.get("items") or []]
     assert "status_changed" in types
     assert "tags_updated" in types
 

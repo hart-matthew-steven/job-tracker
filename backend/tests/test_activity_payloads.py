@@ -1,6 +1,14 @@
 from __future__ import annotations
 
 
+def _activity_items(client, job_id: int):
+    res = client.get(f"/jobs/{job_id}/activity")
+    assert res.status_code == 200
+    payload = res.json()
+    assert isinstance(payload, dict)
+    return payload.get("items") or []
+
+
 def test_status_changed_payload_and_normalization(client):
     # Create job with default status "applied"
     res = client.post(
@@ -15,18 +23,15 @@ def test_status_changed_payload_and_normalization(client):
     assert res2.status_code == 200
     assert res2.json()["status"] == "applied"
 
-    res3 = client.get(f"/jobs/{job['id']}/activity")
-    assert res3.status_code == 200
-    assert all(ev["type"] != "status_changed" for ev in res3.json())
+    res3_items = _activity_items(client, job["id"])
+    assert all(ev["type"] != "status_changed" for ev in res3_items)
 
     # Changing status should log with from/to and normalized "to".
     res4 = client.patch(f"/jobs/{job['id']}", json={"status": "  Interviewing  "})
     assert res4.status_code == 200
     assert res4.json()["status"] == "interviewing"
 
-    res5 = client.get(f"/jobs/{job['id']}/activity")
-    assert res5.status_code == 200
-    events = res5.json()
+    events = _activity_items(client, job["id"])
     ev = next(e for e in events if e["type"] == "status_changed")
     assert ev["data"]["from"] == "applied"
     assert ev["data"]["to"] == "interviewing"
@@ -50,9 +55,7 @@ def test_tags_updated_payload_added_removed_sorted(client):
     res2 = client.patch(f"/jobs/{job['id']}", json={"tags": ["Python", "onsite", "python"]})
     assert res2.status_code == 200
 
-    res3 = client.get(f"/jobs/{job['id']}/activity")
-    assert res3.status_code == 200
-    events = res3.json()
+    events = _activity_items(client, job["id"])
     ev = next(e for e in events if e["type"] == "tags_updated")
 
     assert ev["data"]["added"] == ["onsite"]

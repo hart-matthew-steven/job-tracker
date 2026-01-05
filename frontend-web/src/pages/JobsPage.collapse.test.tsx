@@ -83,7 +83,7 @@ const baseUser: UseCurrentUserResult = {
   },
   loading: false,
   error: "",
-  reload: vi.fn().mockResolvedValue(),
+  reload: vi.fn().mockResolvedValue(undefined),
   isStub: false,
 };
 
@@ -115,22 +115,21 @@ describe("JobsPage collapse persistence", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     api.listSavedViews.mockResolvedValue([]);
-    api.listJobs.mockResolvedValue([
-      {
-        id: 1,
-        company_name: "Acme",
-        job_title: "Engineer",
-        location: "Remote",
-        status: "applied",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        last_activity_at: new Date().toISOString(),
-        tags: [],
-      },
-    ]);
-    api.getJob.mockResolvedValue(null);
+    const job = {
+      id: 1,
+      company_name: "Acme",
+      job_title: "Engineer",
+      location: "Remote",
+      status: "applied",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      last_activity_at: new Date().toISOString(),
+      tags: [],
+    };
+    api.listJobs.mockResolvedValue([job]);
+    api.getJob.mockResolvedValue(job);
     api.getJobDetails.mockResolvedValue({
-      job: null,
+      job,
       notes: [],
       interviews: [],
       activity: emptyActivityPage,
@@ -141,11 +140,15 @@ describe("JobsPage collapse persistence", () => {
   });
 
   it("hydrates collapsed state from ui_preferences", async () => {
+    const user = userEvent.setup();
     await renderPage({
       ui_preferences: { job_details_notes_collapsed: true },
     });
 
-    expect(screen.getByTestId("toggle-notes")).toHaveTextContent("Expand notes");
+    const jobButton = await screen.findByRole("button", { name: /Acme — Engineer/i });
+    await user.click(jobButton);
+
+    expect(await screen.findByTestId("toggle-notes")).toHaveTextContent("Expand notes");
   });
 
   it("persists collapse toggles via updateUiPreferences", async () => {
@@ -153,6 +156,8 @@ describe("JobsPage collapse persistence", () => {
     api.updateUiPreferences.mockResolvedValue({ ui_preferences: { job_details_notes_collapsed: true } });
 
     await renderPage();
+    const jobButton = await screen.findByRole("button", { name: /Acme — Engineer/i });
+    await user.click(jobButton);
     const toggle = await screen.findByTestId("toggle-notes");
     expect(toggle).toHaveTextContent("Collapse notes");
 

@@ -74,7 +74,7 @@ const currentUserValue: UseCurrentUserResult = {
   },
   loading: false,
   error: "",
-  reload: vi.fn().mockResolvedValue(),
+  reload: vi.fn().mockResolvedValue(undefined),
   isStub: false,
 };
 
