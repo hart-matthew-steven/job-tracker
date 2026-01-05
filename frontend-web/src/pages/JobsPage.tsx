@@ -9,7 +9,7 @@ import TimelineCard from "../components/jobs/TimelineCard";
 import InterviewsCard from "../components/jobs/InterviewsCard";
 import Modal from "../components/ui/Modal";
 import { useToast } from "../components/ui/toast";
-import { useCurrentUserContext } from "../context/CurrentUserContext";
+import { useCurrentUserContext } from "../context/useCurrentUserContext";
 
 import { useSettings } from "../hooks/useSettings";
 import SavedViewsModal from "./jobs/SavedViewsModal";
