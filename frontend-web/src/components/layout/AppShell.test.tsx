@@ -30,11 +30,11 @@ describe("AppShell", () => {
   it("navigates via sidebar links", async () => {
     const user = userEvent.setup();
     render(
-      <MemoryRouter initialEntries={["/"]}>
+      <MemoryRouter initialEntries={["/board"]}>
         <Routes>
           <Route element={<AppShell onLogout={() => {}} />}>
-            <Route path="/" element={<div>Dashboard</div>} />
-            <Route path="/jobs" element={<div>Jobs</div>} />
+            <Route path="/board" element={<div>Board</div>} />
+            <Route path="/insights" element={<div>Insights</div>} />
           </Route>
           <Route path="*" element={<LocationDisplay />} />
         </Routes>
@@ -42,12 +42,12 @@ describe("AppShell", () => {
     );
 
     const main = screen.getByRole("main");
-    expect(within(main).getByText("Dashboard")).toBeInTheDocument();
-    await user.click(screen.getByRole("link", { name: "Jobs" }));
-    expect(within(main).getByText("Jobs")).toBeInTheDocument();
+    expect(within(main).getByText("Board")).toBeInTheDocument();
+    await user.click(screen.getByRole("link", { name: "Insights" }));
+    expect(within(main).getByText("Insights")).toBeInTheDocument();
   });
 
-  it("account menu logout calls onLogout and routes to /login", async () => {
+  it("account menu logout calls onLogout and routes to home", async () => {
     const user = userEvent.setup();
     const onLogout = vi.fn().mockResolvedValue(undefined);
 
@@ -57,7 +57,7 @@ describe("AppShell", () => {
           <Route element={<AppShell onLogout={onLogout} />}>
             <Route path="/jobs" element={<div>Jobs</div>} />
           </Route>
-          <Route path="/login" element={<div>Login</div>} />
+          <Route path="/" element={<div>Home</div>} />
           <Route path="*" element={<LocationDisplay />} />
         </Routes>
       </MemoryRouter>
@@ -69,7 +69,7 @@ describe("AppShell", () => {
 
     await user.click(screen.getByRole("menuitem", { name: "Logout" }));
     expect(onLogout).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText("Login")).toBeInTheDocument();
+    expect(await screen.findByText("Home")).toBeInTheDocument();
   });
 
   it("redirects to change password when user must rotate credentials", async () => {

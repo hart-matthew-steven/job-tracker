@@ -17,11 +17,12 @@ from app.schemas.user import (
 
 router = APIRouter(prefix="/users", tags=["users"])
 
-UI_COLLAPSE_PREF_KEYS = {
+UI_PREFERENCE_KEYS = {
     "job_details_notes_collapsed",
     "job_details_interviews_collapsed",
     "job_details_timeline_collapsed",
     "job_details_documents_collapsed",
+    "nav_expanded",
 }
 
 @router.get("/me", response_model=UserMeOut)
@@ -75,7 +76,7 @@ def update_ui_preferences(
     db_user = _load_user_in_session(db, user)
     prefs = dict(getattr(db_user, "ui_preferences", {}) or {})
     for key, value in payload.preferences.items():
-        if key not in UI_COLLAPSE_PREF_KEYS:
+        if key not in UI_PREFERENCE_KEYS:
             raise HTTPException(status_code=400, detail=f"Unknown preference key: {key}")
         prefs[key] = bool(value)
 

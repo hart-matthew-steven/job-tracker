@@ -71,6 +71,10 @@ export type Job = {
   status?: string | null;
   applied_date?: string | null;
   last_activity_at?: string | null;
+  last_action_at?: string | null;
+  next_action_at?: string | null;
+  next_action_title?: string | null;
+  priority?: string | null;
   created_at?: string;
   updated_at?: string;
   tags?: string[];
@@ -88,6 +92,10 @@ export type PatchJobIn = Partial<CreateJobIn> & {
   status?: string | null;
   applied_date?: string | null;
   tags?: string[];
+  priority?: string | null;
+  next_action_at?: string | null;
+  next_action_title?: string | null;
+  last_action_at?: string | null;
 };
 
 export type JobDetailsBundle = {
@@ -151,6 +159,34 @@ export type JobActivity = {
 export type JobActivityPage = {
   items: JobActivity[];
   next_cursor?: number | null;
+};
+
+export type JobBoardCard = {
+  id: number;
+  status: string;
+  company_name: string;
+  job_title: string;
+  location?: string | null;
+  updated_at: string;
+  last_activity_at?: string | null;
+  last_action_at?: string | null;
+  next_action_at?: string | null;
+  next_action_title?: string | null;
+  priority: string;
+  tags: string[];
+  needs_follow_up: boolean;
+};
+
+export type JobsBoardResponse = {
+  statuses: string[];
+  jobs: JobBoardCard[];
+  meta?: Record<string, unknown>;
+};
+
+export type ActivityMetrics = {
+  range_days: number;
+  total_events: number;
+  per_type: Record<string, number>;
 };
 
 // -------- Interviews --------

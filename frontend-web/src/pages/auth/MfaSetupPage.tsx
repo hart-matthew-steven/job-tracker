@@ -121,7 +121,7 @@ export default function MfaSetupPage() {
     return (
         <div className="space-y-5">
             <div className="text-sm text-slate-600 dark:text-slate-300">
-                Step 2 of 2 — Add Job Tracker to your authenticator app
+                Step 2 of 2 — Add Job Applications Tracker to your authenticator app
             </div>
 
             {error && (

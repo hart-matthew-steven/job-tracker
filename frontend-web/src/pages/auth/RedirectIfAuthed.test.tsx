@@ -38,7 +38,7 @@ describe("RedirectIfAuthed", () => {
     expect(await screen.findByText("LoginForm")).toBeInTheDocument();
   });
 
-  it("redirects authenticated users to next or /", async () => {
+  it("redirects authenticated users to supplied next path", async () => {
     auth.useAuth.mockReturnValue({ isAuthenticated: true });
     render(
       <MemoryRouter initialEntries={["/login?next=%2Fjobs"]}>
@@ -58,6 +58,27 @@ describe("RedirectIfAuthed", () => {
     );
 
     expect(await screen.findByText("JobsRoute")).toBeInTheDocument();
+  });
+
+  it("defaults authenticated users to /board when no next is provided", async () => {
+    auth.useAuth.mockReturnValue({ isAuthenticated: true });
+    render(
+      <MemoryRouter initialEntries={["/login"]}>
+        <Routes>
+          <Route
+            path="/login"
+            element={
+              <RedirectIfAuthed>
+                <div>LoginForm</div>
+              </RedirectIfAuthed>
+            }
+          />
+          <Route path="/board" element={<LocationDisplay />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByTestId("location")).toHaveTextContent("/board");
   });
 });
 

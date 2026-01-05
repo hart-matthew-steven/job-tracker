@@ -27,6 +27,7 @@ type Props = {
   onDeleteNote: (noteId: number) => void | Promise<void>;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  isDemo?: boolean;
 };
 
 export default function NotesCard({
@@ -37,6 +38,7 @@ export default function NotesCard({
   onDeleteNote,
   collapsed = false,
   onToggleCollapse,
+  isDemo = false,
 }: Props) {
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
@@ -84,11 +86,13 @@ export default function NotesCard({
               onKeyDown={(e) => {
                 if (e.key === "Enter") onAddNote();
               }}
+              disabled={isDemo}
             />
 
             <button
               onClick={onAddNote}
-              className="rounded-lg px-5 py-2 text-sm font-semibold transition border border-slate-700 bg-slate-900/60 text-slate-200 hover:bg-slate-900 cursor-pointer"
+              className="rounded-lg px-5 py-2 text-sm font-semibold transition border border-slate-700 bg-slate-900/60 text-slate-200 hover:bg-slate-900 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={isDemo}
             >
               Add
             </button>

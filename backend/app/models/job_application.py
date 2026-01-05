@@ -37,6 +37,10 @@ class JobApplication(Base):
     )
 
     last_activity_at = Column(DateTime(timezone=True), nullable=True)
+    last_action_at = Column(DateTime(timezone=True), nullable=True)
+    next_action_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    next_action_title = Column(String(255), nullable=True)
+    priority = Column(String(32), nullable=False, default="normal", server_default="normal")
 
     # ✅ relationship back to User (optional but recommended)
     user = relationship("User", back_populates="job_applications")

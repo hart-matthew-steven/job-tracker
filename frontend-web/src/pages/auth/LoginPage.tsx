@@ -12,9 +12,9 @@ import { getCurrentUser } from "../../api";
 
 function safeNext(nextRaw: string | null) {
   const v = (nextRaw || "").trim();
-  if (!v) return "/";
+  if (!v || v === "/") return ROUTES.board;
   if (v.startsWith("/") && !v.startsWith("//")) return v;
-  return "/";
+  return ROUTES.board;
 }
 
 export default function LoginPage() {

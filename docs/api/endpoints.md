@@ -103,6 +103,7 @@ Guidelines:
 - `POST /jobs`
   - Auth: Bearer
   - Body: `JobApplicationCreate`
+  - Notes: Triggered by the global “Create job” button that now lives in the header on desktop and mobile; there is no separate mobile-only endpoint.
 
 - `GET /jobs/{job_id}`
   - Auth: Bearer
@@ -116,6 +117,16 @@ Guidelines:
   - Auth: Bearer
   - Body: `JobApplicationUpdate`
   - Notes: Tag/status changes log activity entries.
+
+- `GET /jobs/board`
+  - Auth: Bearer
+  - Response: `{ statuses: string[], jobs: JobBoardCard[], meta }`
+  - Notes: Returns board-ready cards with `priority`, `last_action_at`, `next_action_at`, `next_action_title`, and `needs_follow_up` hints.
+
+- `GET /jobs/search?q=term`
+  - Auth: Bearer
+  - Query: `q` (min length 1), `limit` (default 20)
+  - Notes: Searches company/title/location + notes. Returns a board-style payload for the command palette.
 
 ### Activity
 
@@ -173,6 +184,12 @@ Guidelines:
 - `POST /jobs/{job_id}/documents/{document_id}/scan-result`
   - Auth: Shared secret (`X-Scan-Secret`)
   - Notes: GuardDuty → backend scan callback path.
+
+### Metrics
+
+- `GET /jobs/metrics/activity?range_days=7`
+  - Auth: Bearer
+  - Notes: Returns `{ range_days, total_events, per_type }` for the activity pulse widget.
 
 ## Saved Views
 

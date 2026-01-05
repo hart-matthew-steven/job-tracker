@@ -62,3 +62,17 @@ def test_tags_updated_payload_added_removed_sorted(client):
     assert ev["data"]["removed"] == ["remote"]
 
 
+def test_activity_metrics_endpoint(client):
+    job = client.post(
+        "/jobs/",
+        json={"company_name": "TestCo", "job_title": "Engineer"},
+    ).json()
+
+    client.post(f"/jobs/{job['id']}/notes", json={"body": "Ping hiring manager"})
+
+    metrics = client.get("/jobs/metrics/activity?range_days=7")
+    assert metrics.status_code == 200
+    data = metrics.json()
+    assert data["total_events"] >= 1
+
+

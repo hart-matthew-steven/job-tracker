@@ -7,6 +7,7 @@ import { cognitoSignup } from "../../api/authCognito";
 import { useToast } from "../../components/ui/toast";
 import { evaluatePassword, describeViolation, PASSWORD_MIN_LENGTH, type PasswordViolation } from "../../lib/passwordPolicy";
 import PasswordRequirements from "../../components/forms/PasswordRequirements";
+import { ROUTES } from "../../routes/paths";
 
 declare global {
   interface Window {
@@ -30,9 +31,9 @@ function resolveTurnstileSiteKey(): string {
 
 function safeNext(nextRaw: string | null) {
   const v = (nextRaw || "").trim();
-  if (!v) return "/";
+  if (!v || v === "/") return ROUTES.board;
   if (v.startsWith("/") && !v.startsWith("//")) return v;
-  return "/";
+  return ROUTES.board;
 }
 
 export default function RegisterPage() {

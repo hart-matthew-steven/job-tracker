@@ -34,6 +34,7 @@ Non-goals:
 - **No secret material in git:** secrets come from environment or a secret manager
 - **Auditability:** key actions have traceable logs/metadata (without storing secrets)
 - **Expire abandoned sessions:** long-lived refresh tokens stay in Cognito, but the SPA still signs out idle tabs after a fixed window to reduce risk if a workstation is left unlocked.
+- **Limit anonymous data exposure:** the new `/demo/board` route is intentionally static and ships only seeded sample data so unauthenticated visits never touch live pipelines or surface real user information.
 
 ### Idle session timeout (client-enforced)
 
@@ -196,6 +197,22 @@ If authentication exists:
 - Prefer short-lived access tokens
 - Store tokens securely (avoid leaking to logs)
 - Apply consistent permission checks in backend service layer
+
+### Authentication & User Lifecycle (Cognito Option B)
+
+| State | Description | Allowed endpoints |
+| --- | --- | --- |
+| Unauthenticated | No valid Cognito session | `/health`, `/auth/cognito/*`, `/auth/cognito/verification/send`, `/auth/cognito/verification/confirm` |
+| Authenticated, email **not** verified | Cognito token issued but `users.is_email_verified = false` | `/auth/cognito/verification/send`, `/auth/cognito/verification/confirm`, `/auth/cognito/logout`, `GET /users/me` |
+| Authenticated, email verified | Token issued + DB flag true | All protected routes |
+
+Controls:
+
+- **Pre Sign-up Lambda** (`lambda/cognito_pre_signup/`) runs for `PreSignUp_SignUp` and `PreSignUp_AdminCreateUser`, sets `autoConfirmUser=true` / `autoVerifyEmail=false`, and performs no external calls. Cognito marks users confirmed immediately while the product retains control of verification emails.
+- **App-enforced verification**: `/auth/cognito/verification/send` (rate limited) generates 6-digit codes, stores only salted SHA-256 hashes with TTL/cooldown/attempt caps, and emails via Resend. `/auth/cognito/verification/confirm` validates codes, marks `users.is_email_verified`, timestamps `email_verified_at`, and calls Cognito `AdminUpdateUserAttributes` (`Username=cognito_sub`, `email_verified=true`) so native clients see the same state. Middleware blocks every other route until the flag is true.
+- **MFA**: Cognito requires SOFTWARE_TOKEN_MFA. The backend handles `MFA_SETUP`, `SOFTWARE_TOKEN_MFA`, and follow-up challenges through `/auth/cognito/mfa/*` and `/auth/cognito/challenge`; the SPA never calls Cognito directly.
+- **Idle timeout**: `AuthProvider` clears local tokens and redirects to `/login` after ~30 minutes of inactivity (configurable via `VITE_IDLE_TIMEOUT_MINUTES`, minimum 5) even though Cognito refresh tokens last 30 days.
+- **Token storage**: Access/ID tokens live in memory + `sessionStorage`; refresh tokens stay in `sessionStorage` only. Logout best-effort calls `/auth/cognito/logout` before clearing storage.
 
 ---
 

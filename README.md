@@ -49,18 +49,24 @@ Location: `frontend-web/`
 Stack: React + Vite (TypeScript)
 
 Responsibilities:
-- User interface for tracking job applications and statuses
-- Views for notes, documents, and related metadata
-- Communication with the backend via a centralized API client
-- Persists per-user UI preferences (e.g., collapsed cards) by calling `PATCH /users/me/ui-preferences`
+- Kanban board (`/board`) with drag-and-drop swimlanes, right-side drawer, momentum controls, and follow-up suggestions
+- Legacy list view (`/jobs`) and detail forms for notes, documents, activity, and reminders
+- Global search modal (⌘K / Ctrl+K) that calls `/jobs/search` and deep-links into the drawer
+- Icon-only navigation shell + activity pulse widget, with per-user preferences persisted via `PATCH /users/me/ui-preferences`
 - Automatically signs users out after a period of inactivity (default 30 minutes, configurable via `VITE_IDLE_TIMEOUT_MINUTES`)
+
+UI highlights:
+
+- **Momentum mode:** one-tap follow-up/apply/reminder actions update `last_action_at`/`next_action_at` and resurface stale roles.
+- **Smart suggestions:** cards flagged as `needs_follow_up` float to the board header for quick triage.
+- **Command palette:** `⌘K` / `Ctrl+K` opens the global search modal and selects a job directly in the drawer.
+- **Marketing landing page + demo:** `/` showcases the product with hero + feature grid + CTA buttons, and the “View demo board” CTA links to `/demo/board` so prospects can explore a read-only kanban preview without signing in.
 
 Common entry points:
 - `frontend-web/src/main.tsx`
 - `frontend-web/src/App.tsx`
 
-Frontend-specific documentation (if present) lives under:
-- `docs/frontend/`
+Frontend-specific documentation lives under `docs/frontend/` (see `docs/frontend/overview.md` for the board-first component map and responsive shell notes).
 
 ---
 
@@ -70,12 +76,12 @@ Location: `backend/`
 Stack: Python API (FastAPI-style architecture)
 
 Responsibilities:
-- Authentication and session handling (if applicable)
-- API endpoints for job applications, notes, and related resources
+- Authentication and enforcement of Cognito access tokens
+- API endpoints for job applications, notes, interviews, documents, UI preferences, board/search/metrics helpers
 - Data validation, persistence, and error handling
-- Integration with background processing and security services
-- Stores per-user UI preferences in `users.ui_preferences` (JSON) and exposes them via `/users/me/ui-preferences`
-- Optimized job-detail fetch via `GET /jobs/{job_id}/details`, which bundles the job, notes, interviews, and recent activity into one payload for the Jobs page
+- Integration with GuardDuty malware scanning plus other security services
+- Stores per-user UI preferences in `users.ui_preferences` (JSON) and exposes board/search telemetry via `/jobs/board`, `/jobs/search`, and `/jobs/metrics/activity`
+- Optimized job-detail fetch via `GET /jobs/{job_id}/details`, which bundles the job, notes, interviews, and recent activity into one payload for the drawer
 
 Typical structure:
 
@@ -242,44 +248,22 @@ After the image is pushed, point the App Runner service at the new ECR tag (or u
    npm run dev
    ```
 4. End-to-end flow:
-   1. **Signup** – `/auth/cognito/signup` (name, email, strong password, Turnstile token).
-   2. **Confirm** – `/auth/cognito/confirm` with the verification code Cognito emails you.
+   1. **Signup** – `/auth/cognito/signup` (name, email, strong password, Turnstile token). Pre Sign-up Lambda auto-confirms the account so Cognito doesn’t send its own email.
+   2. **Verify email (app-enforced)** – `/auth/cognito/verification/send` issues the 6-digit code, `/auth/cognito/verification/confirm` validates it and unlocks the account. The SPA routes to `/verify` right after signup and retries if a login hits `403 EMAIL_NOT_VERIFIED`.
    3. **Login / MFA setup** – `/auth/cognito/login` → `/auth/cognito/mfa/setup` → `/auth/cognito/mfa/verify`.
    4. **Subsequent login** – `/auth/cognito/login` + `/auth/cognito/challenge` (SOFTWARE_TOKEN_MFA).
    5. **API calls** – SPA automatically attaches the Cognito access token to every request.
 
-## Cognito Pre Sign-up Lambda
+## Cognito signup & verification internals
 
-- Folder: `lambda/cognito_pre_signup/`
-- Purpose: attached to the Cognito **Pre Sign-up** trigger so Cognito auto-confirms new users and skips its built-in verification emails. This keeps email ownership on our side for future Resend-based flows.
-- Behavior: sets `autoConfirmUser=true` and `autoVerifyEmail=false` for supported trigger sources (`PreSignUp_SignUp`, `PreSignUp_AdminCreateUser`) and logs the trigger.
-- No network calls, secrets, or external services. See the lambda README for build/push instructions and attach steps.
-
-## Email verification (app-enforced)
-
-- Cognito accounts are auto-confirmed, but the backend blocks all protected APIs with `403 EMAIL_NOT_VERIFIED` while `users.is_email_verified = false`.
-- Signup automatically triggers the first verification email, so the `/verify` screen shows “code sent” and honors the resend cooldown before re-hitting the backend.
-- Endpoints:
-  - `POST /auth/cognito/verification/send` → throttled, public endpoint; generates a 6-digit code (hash + TTL) and emails it via Resend.
-  - `POST /auth/cognito/verification/confirm` → validates the code, marks the DB record verified, and calls Cognito `AdminUpdateUserAttributes` with `Username=cognito_sub` / `email_verified=true`.
-- Config knobs (see `.env.example`): `EMAIL_VERIFICATION_ENABLED`, `EMAIL_VERIFICATION_CODE_TTL_SECONDS`, `EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS`, `EMAIL_VERIFICATION_MAX_ATTEMPTS`, `RESEND_FROM_EMAIL`.
-- Docs: `docs/auth-email-verification.md` (flow details, security notes, testing steps).
-
-## Email Verification (App-enforced)
-
-- Why: Cognito no longer sends confirmation emails (Pre Sign-up Lambda auto-confirms), but we still need trusted verification for AI billing and iOS parity. The app now owns verification end-to-end.
-- Backend:
-  - Config (`.env.example`): `EMAIL_VERIFICATION_ENABLED`, `EMAIL_VERIFICATION_CODE_TTL_SECONDS`, `EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS`, `EMAIL_VERIFICATION_MAX_ATTEMPTS`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `FRONTEND_BASE_URL`.
-  - Table `email_verification_codes` stores salted+hashed codes, TTL, attempts, resend cooldown.
-  - Endpoints:
-    - `POST /auth/cognito/verification/send` (public but rate limited) – generates a 6-digit code, stores hash, sends via Resend.
-    - `POST /auth/cognito/verification/confirm` – validates code, marks `users.is_email_verified=true`, syncs `email_verified=true` back to Cognito using `Username=cognito_sub`.
-  - Middleware blocks all other APIs with `403 EMAIL_NOT_VERIFIED` until the DB flag is true (only verification endpoints, logout, and `GET /users/me` stay open).
-- Frontend:
-  - Login fetches `/users/me`; if unverified it automatically requests a code and routes to `/verify`.
-  - `/verify` screen allows resend (default 60s cooldown) and confirmation.
-  - Any 403 EMAIL_NOT_VERIFIED automatically redirects back to `/verify`.
-- Resend: Uses the official Python SDK; no raw codes logged. Emails are short, code-only, and mention the 15-minute expiry.
+- **Pre Sign-up Lambda** (`lambda/cognito_pre_signup/`) is attached to Cognito’s Pre Sign-up trigger. It sets `autoConfirmUser=true` / `autoVerifyEmail=false`, performs no network calls, and simply logs the trigger so Cognito stops emailing confirmation codes. Accounts land in `CONFIRMED` state immediately and the product owns all verification UX.
+- **App-enforced verification**:
+  - Signup auto-generates the first 6-digit code (salted SHA-256 hash + TTL/cooldown/attempt caps) and sends it via Resend; the `/verify` page shows “code sent” plus the cooldown countdown.
+  - `POST /auth/cognito/verification/send` is a public, rate-limited endpoint that regenerates the code and returns `resend_available_in_seconds`.
+  - `POST /auth/cognito/verification/confirm` validates the code, marks `users.is_email_verified` / `email_verified_at`, and calls Cognito `AdminUpdateUserAttributes` (`Username=cognito_sub`, `email_verified=true`) so native clients stay consistent.
+  - Middleware blocks every other API (besides verification endpoints, logout, and `GET /users/me`) with `403 EMAIL_NOT_VERIFIED` until the DB flag is true.
+  - Config knobs (`.env.example`): `EMAIL_VERIFICATION_ENABLED`, `EMAIL_VERIFICATION_CODE_TTL_SECONDS`, `EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS`, `EMAIL_VERIFICATION_MAX_ATTEMPTS`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `FRONTEND_BASE_URL`.
+- See `docs/architecture/cognito-option-b.md` and `docs/architecture/security.md` for the full sequence diagrams and threat model.
 
 ### Refresh flow testing
 
@@ -426,7 +410,7 @@ This repo includes a generated `backend/.env.example` (**names only**, no values
 - Rotation-specific fields (`password_changed_at`, `PASSWORD_MAX_AGE_DAYS`, `must_change_password`) were removed once Cognito became the sole auth provider; future rotation is governed by Cognito policies.
 - The backend is the source of truth; the frontend mirrors the rules for UX-only validation.
 
-- Email verification is enforced by the app: after signup we route users to `/verify` to request/confirm a 6-digit code via Resend (`/auth/cognito/verification/send` + `/auth/cognito/verification/confirm`). If someone tries to log in before verifying, every protected API still returns `403 EMAIL_NOT_VERIFIED` and the UI redirects back to `/verify`. Once verified, the backend marks `users.is_email_verified = true` and syncs `email_verified=true` to Cognito via `AdminUpdateUserAttributes` so native clients stay in sync. Settings + flow docs live in `docs/auth-email-verification.md`.
+- Email verification is enforced by the app: after signup we route users to `/verify` to request/confirm a 6-digit code via Resend (`/auth/cognito/verification/send` + `/auth/cognito/verification/confirm`). If someone tries to log in before verifying, every protected API still returns `403 EMAIL_NOT_VERIFIED` and the UI redirects back to `/verify`. Once verified, the backend marks `users.is_email_verified = true` and syncs `email_verified=true` to Cognito via `AdminUpdateUserAttributes` so native clients stay in sync. Settings + flow docs live in `docs/architecture/cognito-option-b.md`.
 - Idle timeout (frontend): `VITE_IDLE_TIMEOUT_MINUTES` (optional, default 30, minimum 5) controls how long the SPA waits before logging out an inactive tab.
 - Idle timeout (frontend): `VITE_IDLE_TIMEOUT_MINUTES` (optional, default 30) controls how long the SPA waits before logging out a tab with no activity.
 

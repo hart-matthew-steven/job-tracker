@@ -22,7 +22,9 @@ Primary goals:
 - Shared password policy helper in `src/lib/passwordPolicy.ts`
 - Password requirements UI (`src/components/forms/PasswordRequirements.tsx`) blocks weak passwords on Register/Change Password
 - Per-user UI preferences (e.g., collapsed cards) are persisted via `PATCH /users/me/ui-preferences` and hydrated through a shared `CurrentUserProvider`.
+- The AppShell keeps “Search” and “Create job” actions inline in the header on every breakpoint. On mobile widths the drawer now only lists navigation links; the header exposes a search pill plus a compact Create button so primary actions are one tap away without opening the drawer.
 - `AuthProvider` centralizes Cognito token storage/logout and now enforces a client-side idle timeout (default ~30 minutes, configurable via `VITE_IDLE_TIMEOUT_MINUTES`, minimum 5). Mouse/keyboard/touch/scroll/visibility events reset the timer; idle tabs are logged out automatically.
+- Marketing site (`/`) highlights the board-first workflow with refreshed messaging (no “private alpha” badge or Jira references) and links to `/demo/board`, a read-only, client-side demo board so prospects can explore the kanban UX without an account.
 
 ### Backend (`backend/`)
 - FastAPI + SQLAlchemy ORM + Alembic migrations on Postgres.

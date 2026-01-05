@@ -30,7 +30,7 @@ function fromLocalInputValue(v: string): string {
   return d.toISOString();
 }
 
-type Draft = {
+export type InterviewDraft = {
   scheduled_at: string;
   stage: string;
   kind: string;
@@ -44,10 +44,11 @@ type Props = {
   items: JobInterview[];
   loading?: boolean;
   error?: string;
-  onCreate: (draft: Draft) => Promise<void> | void;
+  onCreate: (draft: InterviewDraft) => Promise<void> | void;
   onDelete: (id: number) => Promise<void> | void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  demoMode?: boolean;
 };
 
 export default function InterviewsCard({
@@ -58,6 +59,7 @@ export default function InterviewsCard({
   onDelete,
   collapsed = false,
   onToggleCollapse,
+  demoMode = false,
 }: Props) {
   const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-200";
   const fieldClass =
@@ -66,7 +68,7 @@ export default function InterviewsCard({
     "dark:border-slate-700 dark:bg-slate-950/30 dark:text-slate-100 dark:placeholder:text-slate-400";
 
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<Draft>(() => ({
+  const [draft, setDraft] = useState<InterviewDraft>(() => ({
     scheduled_at: new Date().toISOString(),
     stage: "",
     kind: "",
@@ -87,7 +89,7 @@ export default function InterviewsCard({
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-2">
           <div className="text-xl font-semibold">Interviews</div>
-          {!collapsed && (
+          {!collapsed && !demoMode && (
             <button
               type="button"
               onClick={() => setOpen(true)}
@@ -150,12 +152,13 @@ export default function InterviewsCard({
         </>
       )}
 
-      <Modal
-        open={open}
-        onClose={() => setOpen(false)}
-        title="Add interview"
-        maxWidthClassName="max-w-2xl"
-      >
+      {!demoMode && (
+        <Modal
+          open={open}
+          onClose={() => setOpen(false)}
+          title="Add interview"
+          maxWidthClassName="max-w-2xl"
+        >
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -268,7 +271,8 @@ export default function InterviewsCard({
             </button>
           </div>
         </form>
-      </Modal>
+        </Modal>
+      )}
     </div>
   );
 }

@@ -22,3 +22,10 @@ class JobActivityPageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ActivityMetricsOut(BaseModel):
+    range_days: int
+    total_events: int
+    per_type: Dict[str, int]
+
+
+
