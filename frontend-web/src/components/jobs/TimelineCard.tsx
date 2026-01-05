@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import type { JobActivity } from "../../types/api";
 import CollapseToggle from "../ui/CollapseToggle";
 
@@ -27,12 +29,40 @@ function iconFor(type: string): string {
 type Props = {
   items: JobActivity[];
   loading?: boolean;
+  loadingMore?: boolean;
+  hasMore?: boolean;
   error?: string;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  onLoadMore?: () => void;
 };
 
-export default function TimelineCard({ items, loading = false, error = "", collapsed = false, onToggleCollapse }: Props) {
+export default function TimelineCard({
+  items,
+  loading = false,
+  loadingMore = false,
+  hasMore = false,
+  error = "",
+  collapsed = false,
+  onToggleCollapse,
+  onLoadMore,
+}: Props) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const node = listRef.current;
+    if (!node || !onLoadMore) return;
+    const handleScroll = () => {
+      if (!hasMore || loadingMore) return;
+      const { scrollTop, clientHeight, scrollHeight } = node;
+      if (scrollHeight - (scrollTop + clientHeight) < 48) {
+        onLoadMore();
+      }
+    };
+    node.addEventListener("scroll", handleScroll);
+    return () => node.removeEventListener("scroll", handleScroll);
+  }, [hasMore, loadingMore, onLoadMore]);
+
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
       <div className="flex items-center justify-between gap-3">
@@ -54,7 +84,7 @@ export default function TimelineCard({ items, loading = false, error = "", colla
             <div className="mt-3 text-sm text-slate-400">No activity yet.</div>
           )}
 
-          <div className="mt-4 space-y-3">
+          <div ref={listRef} className="mt-4 space-y-3 max-h-80 overflow-y-auto pr-1">
             {items?.map((ev) => (
               <div
                 key={ev.id}
@@ -70,6 +100,12 @@ export default function TimelineCard({ items, loading = false, error = "", colla
               </div>
             ))}
           </div>
+          {loadingMore && (
+            <div className="mt-2 text-xs text-slate-400 text-center">Loading older activity…</div>
+          )}
+          {hasMore && !loadingMore && !loading && items?.length > 0 && (
+            <div className="mt-2 text-xs text-slate-500 text-center">Scroll to load older activity</div>
+          )}
         </>
       )}
     </div>

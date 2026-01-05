@@ -4,6 +4,8 @@ from typing import Optional, List
 from zoneinfo import ZoneInfo
 
 from app.schemas.job_application_note import NoteOut
+from app.schemas.job_activity import JobActivityOut, JobActivityPageOut
+from app.schemas.job_interview import JobInterviewOut
 
 ET = ZoneInfo("America/New_York")
 
@@ -61,3 +63,12 @@ class JobApplicationOut(BaseModel):
 
 class JobApplicationDetailOut(JobApplicationOut):
     notes: List[NoteOut] = []
+
+
+class JobDetailsBundleOut(BaseModel):
+    job: JobApplicationOut
+    notes: List[NoteOut]
+    interviews: List[JobInterviewOut]
+    activity: JobActivityPageOut
+
+    model_config = ConfigDict(from_attributes=True)

@@ -36,6 +36,8 @@ export type EmailVerificationSendOut = { status?: string; message?: string; rese
 export type EmailVerificationConfirmIn = { email: string; code: string };
 
 // -------- Users / Settings --------
+export type UiPreferences = Record<string, boolean>;
+
 export type UserMeOut = {
   id: number;
   email: string;
@@ -45,6 +47,7 @@ export type UserMeOut = {
   is_email_verified: boolean;
   email_verified_at?: string | null;
   must_change_password?: boolean;
+  ui_preferences?: UiPreferences;
 };
 
 export type UserSettingsOut = {
@@ -55,6 +58,8 @@ export type UserSettingsOut = {
   data_retention_days: number;
 };
 export type UpdateSettingsIn = UserSettingsOut;
+export type UiPreferencesOut = { ui_preferences: UiPreferences };
+export type UpdateUiPreferencesIn = { preferences: Record<string, boolean> };
 export type ChangePasswordIn = { current_password: string; new_password: string };
 // -------- Jobs / Notes / Documents (minimal shapes used by UI) --------
 export type Job = {
@@ -83,6 +88,13 @@ export type PatchJobIn = Partial<CreateJobIn> & {
   status?: string | null;
   applied_date?: string | null;
   tags?: string[];
+};
+
+export type JobDetailsBundle = {
+  job: Job;
+  notes: Note[];
+  interviews: JobInterview[];
+  activity: JobActivityPage;
 };
 
 export type Note = {
@@ -134,6 +146,11 @@ export type JobActivity = {
   message?: string | null;
   data?: Record<string, unknown> | null;
   created_at: string;
+};
+
+export type JobActivityPage = {
+  items: JobActivity[];
+  next_cursor?: number | null;
 };
 
 // -------- Interviews --------

@@ -13,6 +13,7 @@ class UserMeOut(BaseModel):
     created_at: datetime
     is_email_verified: bool
     email_verified_at: datetime | None = None
+    ui_preferences: dict[str, bool] | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -33,5 +34,13 @@ class UpdateSettingsIn(BaseModel):
     default_jobs_sort: str = Field(default="updated_desc", max_length=30)
     default_jobs_view: str = Field(default="all", max_length=30)
     data_retention_days: int = Field(default=0, ge=0, le=3650)
+
+
+class UiPreferencesOut(BaseModel):
+    ui_preferences: dict[str, bool]
+
+
+class UpdateUiPreferencesIn(BaseModel):
+    preferences: dict[str, bool] = Field(default_factory=dict)
 
 

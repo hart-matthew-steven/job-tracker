@@ -24,14 +24,16 @@ def test_notes_create_delete_logs_activity(client):
 
     res3 = client.get(f"/jobs/{job['id']}/activity")
     assert res3.status_code == 200
-    assert any(ev["type"] == "note_added" for ev in res3.json())
+    payload = res3.json()
+    assert any(ev["type"] == "note_added" for ev in payload.get("items") or [])
 
     res4 = client.delete(f"/jobs/{job['id']}/notes/{note['id']}")
     assert res4.status_code == 200
     assert res4.json()["deleted"] is True
 
     res5 = client.get(f"/jobs/{job['id']}/activity")
-    assert any(ev["type"] == "note_deleted" for ev in res5.json())
+    payload5 = res5.json()
+    assert any(ev["type"] == "note_deleted" for ev in payload5.get("items") or [])
 
 
 def test_interviews_crud_logs_activity(client):
@@ -57,7 +59,8 @@ def test_interviews_crud_logs_activity(client):
     assert res3.status_code == 200
 
     res4 = client.get(f"/jobs/{job['id']}/activity")
-    types = [ev["type"] for ev in res4.json()]
+    payload = res4.json()
+    types = [ev["type"] for ev in payload.get("items") or []]
     assert "interview_added" in types
     assert "interview_updated" in types
     assert "interview_deleted" in types

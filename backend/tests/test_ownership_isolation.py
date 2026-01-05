@@ -40,7 +40,9 @@ def test_user_cannot_access_other_users_job_or_subresources(users, client_for):
         # Activity exists
         res_act = c_a.get(f"/jobs/{job['id']}/activity")
         assert res_act.status_code == 200
-        assert isinstance(res_act.json(), list)
+        payload = res_act.json()
+        assert isinstance(payload, dict)
+        assert isinstance(payload.get("items"), list)
 
     # Now verify user_b cannot access any of it.
     with client_for(user_b) as c_b:

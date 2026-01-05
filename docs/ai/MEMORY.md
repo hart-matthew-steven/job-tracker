@@ -12,10 +12,12 @@ Keep it concise, factual, and employer-facing.
 - Cognito currently relies on the default Cognito email sender (verification/reset emails come from AWS). A Pre Sign-up Lambda auto-confirms users and keeps Cognito from sending codes while we prep a future custom email flow; the SPA routes new signups straight to `/verify` so they can request/confirm the Resend code before logging in.
 - The backend now enforces email verification via `/auth/cognito/verification/{send,confirm}` (hashed 6-digit codes, TTL, cooldown, Resend delivery). Middleware blocks everything except the verification endpoints/logout/`GET /users/me` until `users.is_email_verified` is true. Successful confirmation also calls Cognito `AdminUpdateUserAttributes` with `Username=cognito_sub` so `email_verified=true` propagates to AWS/iOS clients.
 - Register + Change Password now share a password policy helper and inline `PasswordRequirements` list to block weak passwords before submission; backend error violations render in the UI.
+- Jobs page collapse state is persisted server-side; toggling a card calls `PATCH /users/me/ui-preferences` so the preference follows users across browsers/devices.
+- `AuthProvider` centralizes token storage and now enforces a client-side idle timeout (default 30 minutes, configurable via `VITE_IDLE_TIMEOUT_MINUTES`, min 5). Any keyboard/mouse/touch/scroll/visibility event resets the timer; when it expires the SPA clears tokens and redirects to `/login`.
 - Jobs page:
   - Server-side search + filters (q, tags, multi-select statuses)
   - Saved views UI
-  - Timeline + interviews panels
+  - Timeline + interviews panels (timeline lives in a fixed-height scroll container and automatically fetches older activity as you scroll)
   - Auto-refresh (controlled by user setting)
   - Defaults: applies account default sort/view on first load; “Use defaults” button to re-apply
 - Profile + Change Password wired to backend APIs.
@@ -36,6 +38,8 @@ Keep it concise, factual, and employer-facing.
   - Identity middleware JIT-provisions a row on first Cognito login and attaches `request.state.user` for authorization checks.
 - Settings stored on user with `/users/me/settings` GET/PUT:
   - `auto_refresh_seconds`, `theme`, `default_jobs_sort`, `default_jobs_view`, `data_retention_days`
+- Additional JSON preferences (`users.ui_preferences`) store UI state; `/users/me/ui-preferences` lets clients persist toggles (e.g., notes/interviews/timeline/documents collapsed flags). Identity middleware exposes the data as part of `GET /users/me`.
+- `GET /jobs/{job_id}/details` bundles `{job, notes, interviews, activity: { items, next_cursor }}` so the Jobs page hydrates via a single round trip. Legacy per-resource routes remain for incremental updates after mutations or to fetch additional pages (e.g., `/jobs/{job_id}/activity?cursor_id=...`).
 - Email delivery / verification:
   - `/auth/cognito/verification/send` and `/confirm` are public (no login required). Codes are salted SHA-256 hashes with TTL/cooldown/attempt caps, delivered via Resend (`RESEND_API_KEY`, `RESEND_FROM_EMAIL`).
   - Identity middleware blocks all other APIs with `403 EMAIL_NOT_VERIFIED` until `users.is_email_verified` is true; confirmation also calls Cognito `AdminUpdateUserAttributes` (`Username=cognito_sub`, `email_verified=true`).
@@ -51,7 +55,7 @@ Keep it concise, factual, and employer-facing.
   - Production backend runs on AWS App Runner behind `https://api.jobapptracker.dev`, pulling ECR images built with `docker buildx --platform linux/amd64` and loading secrets from AWS Secrets Manager.
   - GitHub Actions handle production deploys: `backend-deploy.yml` builds/pushes images and calls `scripts/deploy_apprunner.py`; `frontend-deploy.yml` builds the Vite SPA, uploads a versioned release to S3, promotes it, updates metadata, invalidates CloudFront, and runs health checks via `scripts/deploy_frontend.py`.
 - Documents:
-  - Presigned S3 upload flow implemented (presign → upload to S3 → confirm). GuardDuty Malware Protection + Lambda forwarder update `scan_status` before downloads are allowed.
+  - Presigned S3 upload flow implemented (presign → upload to S3 → confirm). GuardDuty Malware Protection + Lambda forwarder update `scan_status` before downloads are allowed. The Lambda now reads `DOC_SCAN_SHARED_SECRET` from AWS Secrets Manager via `DOC_SCAN_SHARED_SECRET_ARN` (not plain env text) before calling `/jobs/{job_id}/documents/{document_id}/scan-result`.
 - Debug endpoints `/auth/debug/token-info` + `/auth/debug/identity` remain dev-only. Authorization across the app depends on Cognito access tokens + DB ownership checks; there is no custom JWT mode anymore.
 
 ## What Is Working
@@ -90,6 +94,9 @@ Keep it concise, factual, and employer-facing.
 - Tailwind v4 note: `dark:` is configured to follow the `.dark` class via `@custom-variant` in `frontend-web/src/index.css` (not media-based).
 
 ## Recent Changes (High Signal)
+- Idle-time logout: the frontend now clears Cognito tokens after ~30 minutes of inactivity (configurable via `VITE_IDLE_TIMEOUT_MINUTES`; min 5) to reduce risk from abandoned tabs without changing Cognito’s refresh token policy.
+- Jobs page performance: added `GET /jobs/{job_id}/details` to bundle job + notes + interviews + activity, replacing four sequential requests on every selection.
+- Timeline pagination: `/jobs/{job_id}/activity` now returns `{items,next_cursor}`, and the frontend timeline uses an infinite-scroll container to append older entries seamlessly.
 - Chunk 9 (rolled back): Cognito Custom Message Lambda removed; Cognito default emails restored while a new plan is evaluated.
 - Chunk 10: Added Pre Sign-up Lambda (auto-confirm, disable `autoVerifyEmail`) so signup doesn’t depend on Cognito email codes.
 - Chunk 11: App-enforced verification (hashed codes in DB, Resend delivery, Cognito admin sync, middleware 403) with updated frontend flow (signup redirects to `/verify`, public resend/confirm endpoints, redirect on 403 `EMAIL_NOT_VERIFIED`).

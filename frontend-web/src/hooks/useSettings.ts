@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getMySettings, updateMySettings } from "../api";
 import { applyThemeToDocument, normalizeTheme, saveThemePreference } from "../lib/theme";
 import type { UpdateSettingsIn, UserSettingsOut } from "../types/api";
@@ -64,7 +64,10 @@ export function useSettings(): UseSettingsResult {
     }
   }, []);
 
+  const loadOnceRef = useRef(false);
   useEffect(() => {
+    if (loadOnceRef.current) return;
+    loadOnceRef.current = true;
     reload();
   }, [reload]);
 

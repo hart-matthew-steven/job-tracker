@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
+import { CurrentUserProvider } from "../../context/CurrentUserContext";
 import { ROUTES } from "../../routes/paths";
 import type { UserMeOut } from "../../types/api";
 
@@ -189,7 +190,8 @@ export default function AppShell({ onLogout }: Props) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <CurrentUserProvider value={currentUser}>
+      <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       {/* Top bar */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/80 backdrop-blur dark:border-slate-800 dark:bg-slate-950">
         <div className="mx-auto max-w-7xl px-4">
@@ -276,7 +278,8 @@ export default function AppShell({ onLogout }: Props) {
           </aside>
         </>
       )}
-    </div>
+      </div>
+    </CurrentUserProvider>
   );
 }
 

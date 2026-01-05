@@ -17,10 +17,13 @@ import type {
   CreateSavedViewIn,
   PatchSavedViewIn,
   SavedView,
-  JobActivity,
+  JobActivityPage,
   CreateInterviewIn,
   JobInterview,
   PatchInterviewIn,
+  UpdateUiPreferencesIn,
+  UiPreferencesOut,
+  JobDetailsBundle,
 } from "./types/api";
 
 import API_BASE from "./lib/apiBase";
@@ -276,15 +279,23 @@ export function updateMySettings(payload: UpdateSettingsIn): Promise<MessageOut>
   });
 }
 
+export function updateUiPreferences(payload: UpdateUiPreferencesIn): Promise<UiPreferencesOut> {
+  return requestJson<UiPreferencesOut>(`/users/me/ui-preferences`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 /** -------------------
  * Saved views
  * ------------------- */
 export function listSavedViews(): Promise<SavedView[]> {
-  return requestJson<SavedView[]>(`/saved-views`);
+  return requestJson<SavedView[]>(`/saved-views/`);
 }
 
 export function createSavedView(payload: CreateSavedViewIn): Promise<SavedView> {
-  return requestJson<SavedView>(`/saved-views`, {
+  return requestJson<SavedView>(`/saved-views/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -330,7 +341,16 @@ export function listJobs(
   }
 
   const qs = params.toString();
-  return requestJson<Job[]>(`/jobs${qs ? `?${qs}` : ""}`);
+  return requestJson<Job[]>(`/jobs/${qs ? `?${qs}` : ""}`);
+}
+
+export function getJobDetails(jobId: number, opts?: { activity_limit?: number }): Promise<JobDetailsBundle> {
+  const params = new URLSearchParams();
+  if (opts?.activity_limit) {
+    params.set("activity_limit", String(opts.activity_limit));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return requestJson<JobDetailsBundle>(`/jobs/${jobId}/details${suffix}`);
 }
 
 export function getJob(jobId: number | string): Promise<Job> {
@@ -338,7 +358,7 @@ export function getJob(jobId: number | string): Promise<Job> {
 }
 
 export function createJob(payload: CreateJobIn): Promise<Job> {
-  return requestJson<Job>(`/jobs`, {
+  return requestJson<Job>(`/jobs/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -356,9 +376,18 @@ export function patchJob(jobId: number | string, payload: PatchJobIn): Promise<J
 /** -------------------
  * Job activity
  * ------------------- */
-export function listJobActivity(jobId: number | string, opts: { limit?: number } = {}): Promise<JobActivity[]> {
-  const limit = Math.max(1, Math.min(Number(opts.limit ?? 50) || 50, 200));
-  return requestJson<JobActivity[]>(`/jobs/${jobId}/activity?limit=${encodeURIComponent(String(limit))}`);
+export function listJobActivity(
+  jobId: number | string,
+  opts: { limit?: number; cursor_id?: number | null } = {}
+): Promise<JobActivityPage> {
+  const params = new URLSearchParams();
+  const limit = Math.max(1, Math.min(Number(opts.limit ?? 20) || 20, 200));
+  params.set("limit", String(limit));
+  if (typeof opts.cursor_id === "number" && Number.isFinite(opts.cursor_id)) {
+    params.set("cursor_id", String(opts.cursor_id));
+  }
+  const qs = params.toString();
+  return requestJson<JobActivityPage>(`/jobs/${jobId}/activity${qs ? `?${qs}` : ""}`);
 }
 
 /** -------------------

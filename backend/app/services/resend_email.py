@@ -39,7 +39,7 @@ def send_email_verification_code(*, to_email: str, code: str, expires_minutes: i
 
     resend.api_key = settings.RESEND_API_KEY
 
-    subject = "Verify your Job Tracker email"
+    subject = f"Job Tracker verification code: {code}"
     expires_text = f"{expires_minutes} minute{'s' if expires_minutes != 1 else ''}"
 
     html_body = f"""
@@ -47,8 +47,11 @@ def send_email_verification_code(*, to_email: str, code: str, expires_minutes: i
       <body style="font-family: Arial, sans-serif; background: #0f172a; padding: 24px; color: #f8fafc;">
         <div style="max-width: 520px; margin: 0 auto; background: #111827; border-radius: 12px; padding: 32px;">
           <h2 style="margin-top: 0; font-size: 1.5rem; color: #f8fafc;">Verify your email</h2>
+          <p style="line-height: 1.6; color: #e2e8f0; font-weight: 600;">
+            {code} is your Job Tracker verification code. It expires in {expires_text}.
+          </p>
           <p style="line-height: 1.6; color: #e2e8f0;">
-            Enter the code below in Job Tracker to verify your email. This code expires in {expires_text}.
+            Enter the code below in Job Tracker to verify your email.
           </p>
           <div style="margin: 24px 0; background: #38bdf8; color: #0f172a; font-size: 32px; letter-spacing: 8px; text-align: center; padding: 18px; border-radius: 10px;">
             {code}
@@ -62,11 +65,7 @@ def send_email_verification_code(*, to_email: str, code: str, expires_minutes: i
     """.strip()
 
     text_body = f"""
-Verify your Job Tracker email
-
-Enter this code in the app (expires in {expires_text}):
-
-{code}
+{code} is your Job Tracker verification code. It expires in {expires_text}.
 
 If you didn’t request this, ignore the message.
 """.strip()

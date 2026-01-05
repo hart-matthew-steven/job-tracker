@@ -4,6 +4,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 
 import { ToastProvider } from "../components/ui/ToastProvider";
+import { CurrentUserProvider } from "../context/CurrentUserContext";
+import type { UseCurrentUserResult } from "../hooks/useCurrentUser";
 
 // ---- Mocks (keep JobsPage test focused on JobsPage logic, not child panels) ----
 vi.mock("../hooks/useSettings", () => {
@@ -23,6 +25,7 @@ vi.mock("../hooks/useSettings", () => {
 const api = {
     listJobs: vi.fn(),
     getJob: vi.fn(),
+    getJobDetails: vi.fn(),
     createJob: vi.fn(),
     patchJob: vi.fn(),
     listNotes: vi.fn(),
@@ -36,9 +39,12 @@ const api = {
     createInterview: vi.fn(),
     deleteInterview: vi.fn(),
     listInterviews: vi.fn(),
+    updateUiPreferences: vi.fn(),
 };
 
 vi.mock("../api", () => api);
+
+const emptyActivityPage = { items: [], next_cursor: null };
 
 vi.mock("../components/documents/DocumentsPanel", () => ({
     default: () => <div data-testid="DocumentsPanel" />,
@@ -59,6 +65,22 @@ vi.mock("../components/jobs/JobCard", () => ({
     default: () => <div>Job form stub</div>,
 }));
 
+const currentUserValue: UseCurrentUserResult = {
+    user: {
+        id: 1,
+        email: "test@example.com",
+        name: "Test User",
+        auto_refresh_seconds: 0,
+        created_at: new Date().toISOString(),
+        is_email_verified: true,
+        ui_preferences: {},
+    },
+    loading: false,
+    error: "",
+    reload: vi.fn().mockResolvedValue(undefined),
+    isStub: false,
+};
+
 async function renderPage() {
     // JobsPage uses requestAnimationFrame + scrollTo.
     // JSDOM doesn't reliably implement these.
@@ -73,7 +95,9 @@ async function renderPage() {
 
     return render(
         <ToastProvider>
-            <JobsPage />
+            <CurrentUserProvider value={currentUserValue}>
+                <JobsPage />
+            </CurrentUserProvider>
         </ToastProvider>
     );
 }
@@ -95,8 +119,14 @@ describe("JobsPage", () => {
             },
         ]);
         api.getJob.mockResolvedValue(null);
+        api.getJobDetails.mockResolvedValue({
+            job: null,
+            notes: [],
+            interviews: [],
+            activity: emptyActivityPage,
+        });
         api.listNotes.mockResolvedValue([]);
-        api.listJobActivity.mockResolvedValue([]);
+        api.listJobActivity.mockResolvedValue(emptyActivityPage);
         api.listInterviews.mockResolvedValue([]);
         try {
             window.localStorage?.clear?.();
@@ -346,23 +376,10 @@ describe("JobsPage", () => {
         expect(await screen.findByText("Saved view updated.")).toBeInTheDocument();
     });
 
-    it("selecting a job loads details (getJob/notes/activity/interviews)", async () => {
+    it("selecting a job loads details via the bundled endpoint", async () => {
         const user = userEvent.setup();
 
-        api.listJobs.mockResolvedValueOnce([
-            {
-                id: 1,
-                company_name: "Acme",
-                job_title: "Engineer",
-                location: "Remote",
-                status: "applied",
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                last_activity_at: new Date().toISOString(),
-                tags: [],
-            },
-        ]);
-        api.getJob.mockResolvedValueOnce({
+        const job = {
             id: 1,
             company_name: "Acme",
             job_title: "Engineer",
@@ -372,10 +389,14 @@ describe("JobsPage", () => {
             updated_at: new Date().toISOString(),
             last_activity_at: new Date().toISOString(),
             tags: [],
+        };
+        api.listJobs.mockResolvedValueOnce([job]);
+        api.getJobDetails.mockResolvedValueOnce({
+            job,
+            notes: [{ id: 10, body: "hello", created_at: new Date().toISOString() }],
+            interviews: [],
+            activity: emptyActivityPage,
         });
-        api.listNotes.mockResolvedValueOnce([]);
-        api.listJobActivity.mockResolvedValueOnce([]);
-        api.listInterviews.mockResolvedValueOnce([]);
 
         await renderPage();
         const label = await screen.findByText("Acme — Engineer");
@@ -383,10 +404,10 @@ describe("JobsPage", () => {
         expect(btn).toBeTruthy();
         await user.click(btn!);
 
-        await waitFor(() => expect(api.getJob).toHaveBeenCalledWith(1));
-        expect(api.listNotes).toHaveBeenCalledWith(1);
-        expect(api.listJobActivity).toHaveBeenCalledWith(1, expect.anything());
-        expect(api.listInterviews).toHaveBeenCalledWith(1);
+        await waitFor(() => expect(api.getJobDetails).toHaveBeenCalledWith(1, { activity_limit: 20 }));
+        expect(api.listNotes).not.toHaveBeenCalled();
+        expect(api.listJobActivity).not.toHaveBeenCalled();
+        expect(api.listInterviews).not.toHaveBeenCalled();
     });
 });
 

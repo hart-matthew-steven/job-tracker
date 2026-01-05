@@ -7,6 +7,9 @@ from app.dependencies.auth import get_current_user
 from app.core.database import get_db
 from app.models.job_application import JobApplication
 from app.models.job_application_tag import JobApplicationTag
+from app.models.job_application_note import JobApplicationNote
+from app.models.job_interview import JobInterview
+from app.models.job_activity import JobActivity
 from app.models.user import User
 from app.services.activity import log_job_activity
 from app.services.jobs import get_job_for_user, normalize_tags, set_job_tags
@@ -14,8 +17,10 @@ from app.schemas.job_application_update import JobApplicationUpdate
 from app.schemas.job_application import (
     JobApplicationCreate,
     JobApplicationOut,
-    JobApplicationDetailOut
+    JobApplicationDetailOut,
+    JobDetailsBundleOut,
 )
+from app.schemas.job_activity import JobActivityPageOut
 
 router = APIRouter(prefix="/jobs", tags=["jobs"], dependencies=[Depends(get_current_user)])
 
@@ -115,6 +120,46 @@ def get_job(
     user: User = Depends(get_current_user),
 ):
     return get_job_for_user(db, job_id, user.id)
+
+
+@router.get("/{job_id}/details", response_model=JobDetailsBundleOut)
+def get_job_details(
+    job_id: int,
+    activity_limit: int = Query(default=20, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    job = get_job_for_user(db, job_id, user.id)
+
+    notes = (
+        db.query(JobApplicationNote)
+        .filter(JobApplicationNote.application_id == job.id)
+        .order_by(JobApplicationNote.created_at.desc(), JobApplicationNote.id.desc())
+        .all()
+    )
+
+    interviews = (
+        db.query(JobInterview)
+        .filter(JobInterview.application_id == job.id, JobInterview.user_id == user.id)
+        .order_by(desc(JobInterview.scheduled_at), desc(JobInterview.id))
+        .all()
+    )
+
+    activity_items = (
+        db.query(JobActivity)
+        .filter(JobActivity.application_id == job.id, JobActivity.user_id == user.id)
+        .order_by(desc(JobActivity.created_at), desc(JobActivity.id))
+        .limit(activity_limit)
+        .all()
+    )
+    activity_next = activity_items[-1].id if len(activity_items) == activity_limit else None
+
+    return JobDetailsBundleOut(
+        job=job,
+        notes=notes,
+        interviews=interviews,
+        activity=JobActivityPageOut(items=activity_items, next_cursor=activity_next),
+    )
 
 
 @router.patch("/{job_id}", response_model=JobApplicationOut)

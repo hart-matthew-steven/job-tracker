@@ -27,6 +27,8 @@ npm run dev
 
 `VITE_TURNSTILE_SITE_KEY` configures the Cloudflare Turnstile widget rendered on `/register`. Use Cloudflare’s public test site key (`1x00000000000000000000AA`) for local dev unless you have provisioned a dedicated Turnstile site.
 
+Optional: set `VITE_IDLE_TIMEOUT_MINUTES` to override the default 30-minute idle logout timer during local testing.
+
 ---
 
 ## Backend Connectivity

@@ -1,5 +1,5 @@
 // src/pages/JobsPage.tsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DocumentsPanel from "../components/documents/DocumentsPanel";
 import JobsList from "../components/jobs/JobsList";
 import NotesCard from "../components/jobs/NotesCard";
@@ -9,6 +9,7 @@ import TimelineCard from "../components/jobs/TimelineCard";
 import InterviewsCard from "../components/jobs/InterviewsCard";
 import Modal from "../components/ui/Modal";
 import { useToast } from "../components/ui/toast";
+import { useCurrentUserContext } from "../context/useCurrentUserContext";
 
 import { useSettings } from "../hooks/useSettings";
 import SavedViewsModal from "./jobs/SavedViewsModal";
@@ -16,6 +17,7 @@ import SavedViewsModal from "./jobs/SavedViewsModal";
 import {
   listJobs,
   getJob,
+  getJobDetails,
   createJob as apiCreateJob,
   patchJob,
   listNotes,
@@ -29,6 +31,7 @@ import {
   createInterview,
   deleteInterview,
   listInterviews,
+  updateUiPreferences,
 } from "../api";
 import type { Job, Note, CreateJobIn, SavedView, JobActivity, JobInterview } from "../types/api";
 
@@ -47,20 +50,92 @@ import {
 } from "./jobs/utils";
 import FiltersPanel from "./jobs/FiltersPanel";
 
+const CARD_PREF_KEYS = {
+  notes: "job_details_notes_collapsed",
+  interviews: "job_details_interviews_collapsed",
+  timeline: "job_details_timeline_collapsed",
+  documents: "job_details_documents_collapsed",
+} as const;
+
+const JOBS_CACHE_KEY = "jt.jobs.cache.v1";
+const SAVED_VIEWS_CACHE_KEY = "jt.saved-views.cache.v1";
+const ACTIVITY_PAGE_SIZE = 20;
+
+function readCache<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as T;
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeCache<T>(key: string, value: T): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore
+  }
+}
+
+type CardKey = keyof typeof CARD_PREF_KEYS;
+
 export default function JobsPage() {
   const { settings, loading: settingsLoading } = useSettings();
   const toast = useToast();
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const { user: currentUser, reload: reloadCurrentUser } = useCurrentUserContext();
+  const [jobs, setJobs] = useState<Job[]>(() => readCache<Job[]>(JOBS_CACHE_KEY, []));
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
-  const [collapsedCards, setCollapsedCards] = useState({
-    notes: false,
-    interviews: false,
-    timeline: false,
-    documents: false,
+  const [collapsedCards, setCollapsedCards] = useState<Record<CardKey, boolean>>({
+    notes: Boolean(currentUser?.ui_preferences?.[CARD_PREF_KEYS.notes]),
+    interviews: Boolean(currentUser?.ui_preferences?.[CARD_PREF_KEYS.interviews]),
+    timeline: Boolean(currentUser?.ui_preferences?.[CARD_PREF_KEYS.timeline]),
+    documents: Boolean(currentUser?.ui_preferences?.[CARD_PREF_KEYS.documents]),
   });
-  const toggleCard = (key: keyof typeof collapsedCards) => {
-    setCollapsedCards((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  useEffect(() => {
+    const prefs = currentUser?.ui_preferences ?? {};
+    setCollapsedCards({
+      notes: Boolean(prefs[CARD_PREF_KEYS.notes]),
+      interviews: Boolean(prefs[CARD_PREF_KEYS.interviews]),
+      timeline: Boolean(prefs[CARD_PREF_KEYS.timeline]),
+      documents: Boolean(prefs[CARD_PREF_KEYS.documents]),
+    });
+  }, [currentUser?.ui_preferences]);
+
+  const persistCollapsePreference = useCallback(
+    async (key: CardKey, nextState: boolean) => {
+      const prefKey = CARD_PREF_KEYS[key];
+      try {
+        await updateUiPreferences({ preferences: { [prefKey]: nextState } });
+        await reloadCurrentUser();
+      } catch (err) {
+        const message = (err as { message?: string } | null)?.message ?? "Failed to save panel preference.";
+        toast.error(message, "Preferences");
+        setCollapsedCards((prev) => ({ ...prev, [key]: !nextState }));
+      }
+    },
+    [reloadCurrentUser, toast]
+  );
+
+  const persistPreferenceRef = useRef(persistCollapsePreference);
+  useEffect(() => {
+    persistPreferenceRef.current = persistCollapsePreference;
+  }, [persistCollapsePreference]);
+
+  const toggleCard = (key: CardKey) => {
+    setCollapsedCards((prev) => {
+      const nextState = !prev[key];
+      queueMicrotask(() => {
+        persistPreferenceRef.current?.(key, nextState);
+      });
+      return { ...prev, [key]: nextState };
+    });
   };
 
 
@@ -81,7 +156,7 @@ export default function JobsPage() {
   const [noteText, setNoteText] = useState("");
 
   // Page state
-  const [loadingJobs, setLoadingJobs] = useState(false);
+  const [loadingJobs, setLoadingJobs] = useState(jobs.length === 0);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
@@ -95,8 +170,8 @@ export default function JobsPage() {
   const [tagFilterOpen, setTagFilterOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [viewsOpen, setViewsOpen] = useState(false);
-  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
-  const [viewsBusy, setViewsBusy] = useState(false);
+  const [savedViews, setSavedViews] = useState<SavedView[]>(() => readCache<SavedView[]>(SAVED_VIEWS_CACHE_KEY, []));
+  const [viewsBusy, setViewsBusy] = useState(savedViews.length === 0);
   const [saveName, setSaveName] = useState("");
   const [selectedSavedViewId, setSelectedSavedViewId] = useState<number | null>(() => {
     try {
@@ -165,6 +240,9 @@ export default function JobsPage() {
   const [activity, setActivity] = useState<JobActivity[]>([]);
   const [loadingActivity, setLoadingActivity] = useState(false);
   const [activityError, setActivityError] = useState("");
+  const [activityCursor, setActivityCursor] = useState<number | null>(null);
+  const [loadingMoreActivity, setLoadingMoreActivity] = useState(false);
+  const loadingMoreActivityRef = useRef(false);
 
   const [interviews, setInterviews] = useState<JobInterview[]>([]);
   const [loadingInterviews, setLoadingInterviews] = useState(false);
@@ -175,7 +253,10 @@ export default function JobsPage() {
   const refreshSeqRef = useRef(0);
   const refreshJobsRef = useRef<(opts?: { source?: string }) => void>(() => { });
 
+  const initialLoadDoneRef = useRef(false);
   useEffect(() => {
+    if (initialLoadDoneRef.current) return;
+    initialLoadDoneRef.current = true;
     refreshJobs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -184,7 +265,12 @@ export default function JobsPage() {
 
   // Refetch when filters change (debounced) so server-side filtering feels instant.
   const filterTimerRef = useRef<number | null>(null);
+  const filtersInitializedRef = useRef(false);
   useEffect(() => {
+    if (!filtersInitializedRef.current) {
+      filtersInitializedRef.current = true;
+      return;
+    }
     if (filterTimerRef.current) window.clearTimeout(filterTimerRef.current);
     filterTimerRef.current = window.setTimeout(() => {
       refreshJobsRef.current?.({ source: "filter" });
@@ -195,18 +281,26 @@ export default function JobsPage() {
   }, [search, tagQuery, selectedTags, selectedStatuses]);
 
   useEffect(() => {
+    let cancelled = false;
     void (async () => {
-      setViewsBusy(true);
+      if (savedViews.length === 0) setViewsBusy(true);
       try {
         const list = await listSavedViews();
-        setSavedViews(Array.isArray(list) ? list : []);
+        if (cancelled) return;
+        const next = Array.isArray(list) ? list : [];
+        setSavedViews(next);
+        writeCache(SAVED_VIEWS_CACHE_KEY, next);
       } catch (e) {
+        if (cancelled) return;
         const msg = (e as { message?: string } | null)?.message ?? "Failed to load saved views";
         toast.error(msg, "Saved views");
       } finally {
-        setViewsBusy(false);
+        if (!cancelled) setViewsBusy(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -265,7 +359,9 @@ export default function JobsPage() {
           })
           : list0;
       if (refreshSeqRef.current !== mySeq) return;
-      setJobs(sortJobsDesc(list));
+      const sorted = sortJobsDesc(list);
+      setJobs(sorted);
+      writeCache(JOBS_CACHE_KEY, sorted);
       setLastUpdatedAt(new Date());
 
       if (selectedJobId && !list.some((j) => j.id === selectedJobId)) {
@@ -277,9 +373,6 @@ export default function JobsPage() {
       const msg = (e as { message?: string } | null)?.message ?? "Failed to load jobs";
       setError(msg);
       toast.error(msg, "Jobs");
-      setJobs([]);
-      setSelectedJob(null);
-      setNotes([]);
     } finally {
       if (refreshSeqRef.current === mySeq) {
         setLoadingJobs(false);
@@ -296,7 +389,9 @@ export default function JobsPage() {
     setJobs((prev) => {
       const exists = prev.some((j) => j.id === updatedJob.id);
       const next = exists ? prev.map((j) => (j.id === updatedJob.id ? { ...j, ...updatedJob } : j)) : [...prev, updatedJob];
-      return sortJobsDesc(next);
+      const sorted = sortJobsDesc(next);
+      writeCache(JOBS_CACHE_KEY, sorted);
+      return sorted;
     });
   }
 
@@ -411,7 +506,11 @@ export default function JobsPage() {
       try {
         const data = getCurrentViewData();
         const created = await createSavedView({ name, data });
-        setSavedViews((prev) => [created, ...prev]);
+        setSavedViews((prev) => {
+          const next = [created, ...prev];
+          writeCache(SAVED_VIEWS_CACHE_KEY, next);
+          return next;
+        });
         setSelectedSavedViewId(created.id);
         toast.success("Saved view created.", "Saved views");
         setSaveName("");
@@ -423,7 +522,11 @@ export default function JobsPage() {
           if (existing) {
             try {
               const updated = await patchSavedView(existing.id, { data: getCurrentViewData() });
-              setSavedViews((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
+              setSavedViews((prev) => {
+                const next = prev.map((v) => (v.id === updated.id ? updated : v));
+                writeCache(SAVED_VIEWS_CACHE_KEY, next);
+                return next;
+              });
               setSelectedSavedViewId(updated.id);
               toast.success("Saved view updated.", "Saved views");
               setSaveName("");
@@ -454,7 +557,11 @@ export default function JobsPage() {
       setViewsBusy(true);
       try {
         await deleteSavedView(sv.id);
-        setSavedViews((prev) => prev.filter((v) => v.id !== sv.id));
+        setSavedViews((prev) => {
+          const next = prev.filter((v) => v.id !== sv.id);
+          writeCache(SAVED_VIEWS_CACHE_KEY, next);
+          return next;
+        });
         if (selectedSavedViewId === sv.id) setSelectedSavedViewId(null);
         toast.success("Saved view deleted.", "Saved views");
       } catch (e) {
@@ -497,56 +604,37 @@ export default function JobsPage() {
 
     setError("");
     setLoadingDetails(true);
+    setLoadingInterviews(true);
+    setLoadingActivity(true);
+    setInterviewsError("");
+    setActivityError("");
 
     const mySeq = ++selectSeqRef.current;
 
     try {
-      const freshJob = await getJob(job.id);
+      const bundle = await getJobDetails(job.id, { activity_limit: ACTIVITY_PAGE_SIZE });
       if (selectSeqRef.current !== mySeq) return;
+
+      const freshJob = bundle?.job ?? (await getJob(job.id));
 
       setSelectedJob(freshJob);
       upsertJob(freshJob);
-
-      const freshNotes = await listNotes(job.id);
-      if (selectSeqRef.current !== mySeq) return;
-
-      setNotes(sortNotesDesc(Array.isArray(freshNotes) ? (freshNotes as Note[]) : []));
-
-      setLoadingInterviews(true);
-      setInterviewsError("");
-      try {
-        const ivs = await listInterviews(job.id);
-        if (selectSeqRef.current !== mySeq) return;
-        setInterviews(Array.isArray(ivs) ? ivs : []);
-      } catch (e4) {
-        if (selectSeqRef.current !== mySeq) return;
-        const msg = (e4 as { message?: string } | null)?.message ?? "Failed to load interviews";
-        setInterviewsError(msg);
-      } finally {
-        if (selectSeqRef.current === mySeq) setLoadingInterviews(false);
-      }
-
-      // Load activity (non-blocking for the rest of the UI)
-      setLoadingActivity(true);
-      setActivityError("");
-      try {
-        const evs = await listJobActivity(job.id, { limit: 80 });
-        if (selectSeqRef.current !== mySeq) return;
-        setActivity(Array.isArray(evs) ? evs : []);
-      } catch (e3) {
-        if (selectSeqRef.current !== mySeq) return;
-        const msg = (e3 as { message?: string } | null)?.message ?? "Failed to load timeline";
-        setActivityError(msg);
-      } finally {
-        if (selectSeqRef.current === mySeq) setLoadingActivity(false);
-      }
+      setNotes(sortNotesDesc(Array.isArray(bundle?.notes) ? (bundle?.notes as Note[]) : []));
+      setInterviews(Array.isArray(bundle?.interviews) ? bundle?.interviews : []);
+      const activityPage = bundle?.activity ?? { items: [], next_cursor: null };
+      setActivity(Array.isArray(activityPage?.items) ? activityPage.items : []);
+      setActivityCursor(activityPage?.next_cursor ?? null);
     } catch (e) {
       if (selectSeqRef.current !== mySeq) return;
       const msg = (e as { message?: string } | null)?.message ?? "Failed to load job details";
       setError(msg);
       toast.error(msg, "Job details");
     } finally {
-      if (selectSeqRef.current === mySeq) setLoadingDetails(false);
+      if (selectSeqRef.current === mySeq) {
+        setLoadingDetails(false);
+        setLoadingInterviews(false);
+        setLoadingActivity(false);
+      }
     }
   }
 
@@ -555,8 +643,9 @@ export default function JobsPage() {
     setLoadingActivity(true);
     setActivityError("");
     try {
-      const evs = await listJobActivity(selectedJob.id, { limit: 80 });
-      setActivity(Array.isArray(evs) ? evs : []);
+      const page = await listJobActivity(selectedJob.id, { limit: ACTIVITY_PAGE_SIZE });
+      setActivity(Array.isArray(page?.items) ? page.items : []);
+      setActivityCursor(page?.next_cursor ?? null);
     } catch (e) {
       const msg = (e as { message?: string } | null)?.message ?? "Failed to load timeline";
       setActivityError(msg);
@@ -565,6 +654,30 @@ export default function JobsPage() {
       setLoadingActivity(false);
     }
   }
+
+  const loadMoreActivity = useCallback(async () => {
+    if (!selectedJob?.id) return;
+    if (!activityCursor) return;
+    if (loadingMoreActivityRef.current || loadingMoreActivity || loadingActivity) return;
+    loadingMoreActivityRef.current = true;
+    setActivityError("");
+    setLoadingMoreActivity(true);
+    try {
+      const page = await listJobActivity(selectedJob.id, {
+        limit: ACTIVITY_PAGE_SIZE,
+        cursor_id: activityCursor,
+      });
+      setActivity((prev) => [...prev, ...(Array.isArray(page?.items) ? page.items : [])]);
+      setActivityCursor(page?.next_cursor ?? null);
+    } catch (e) {
+      const msg = (e as { message?: string } | null)?.message ?? "Failed to load timeline";
+      setActivityError(msg);
+      toast.error(msg, "Timeline");
+    } finally {
+      loadingMoreActivityRef.current = false;
+      setLoadingMoreActivity(false);
+    }
+  }, [selectedJob?.id, activityCursor, loadingMoreActivity, loadingActivity, toast]);
 
   async function refreshInterviews() {
     if (!selectedJob?.id) return;
@@ -700,7 +813,9 @@ export default function JobsPage() {
 
     setJobs((prev) => {
       const next = prev.map((j) => (j.id === selectedJob.id ? { ...j, last_activity_at: iso } : j));
-      return sortJobsDesc(next);
+      const sorted = sortJobsDesc(next);
+      writeCache(JOBS_CACHE_KEY, sorted);
+      return sorted;
     });
   }
 
@@ -947,6 +1062,9 @@ export default function JobsPage() {
               <TimelineCard
                 items={activity}
                 loading={loadingActivity}
+                loadingMore={loadingMoreActivity}
+                hasMore={Boolean(activityCursor)}
+                onLoadMore={loadMoreActivity}
                 error={activityError}
                 collapsed={collapsedCards.timeline}
                 onToggleCollapse={() => toggleCard("timeline")}

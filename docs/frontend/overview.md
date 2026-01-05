@@ -17,6 +17,8 @@ This document describes the frontend structure and conventions at a high level.
 - User interface for tracking applications, statuses, notes, and documents
 - Calls backend API via a centralized client module
 - Presents scan/upload status clearly for user uploads
+- Persists user UI preferences (collapsed cards, etc.) by calling `PATCH /users/me/ui-preferences`
+- Clears Cognito sessions after a configurable period of inactivity; `AuthProvider` listens to user interaction events and logs out idle tabs (default 30 minutes, override via `VITE_IDLE_TIMEOUT_MINUTES`).
 
 ---
 
@@ -43,6 +45,7 @@ Recommended organization:
 Notable hooks:
 - `src/hooks/useCurrentUser.ts` — current user fetch state
 - `src/hooks/useSettings.ts` — user settings fetch/update state (auto refresh frequency)
+- `src/context/CurrentUserContext.tsx` — provides `useCurrentUser()` data to the tree so components can read `ui_preferences`
 
 ---
 

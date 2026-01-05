@@ -43,6 +43,12 @@ function safeNext(nextRaw: string | undefined) {
     return "/";
 }
 
+const DEFAULT_IDLE_TIMEOUT_MINUTES = Math.max(
+    Number(import.meta.env.VITE_IDLE_TIMEOUT_MINUTES ?? "30") || 30,
+    5
+);
+const IDLE_TIMEOUT_MS = DEFAULT_IDLE_TIMEOUT_MINUTES * 60 * 1000;
+
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
     const [session, setSessionState] = useState(() => getStoredSession());
     const [isReady, setIsReady] = useState(false);
@@ -80,7 +86,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         }
     }
 
-    async function logout() {
+    const logout = useCallback(async () => {
         markJustLoggedOut();
         clearStoredSession();
         setSessionState(null);
@@ -90,7 +96,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         } catch {
             // ignore
         }
-    }
+    }, [markJustLoggedOut]);
 
     function isAuthed() {
         return !!session?.accessToken;
@@ -132,6 +138,35 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         // optional UI-driven refresh later; api.js already handles refresh-on-401
         return false;
     }
+
+    useEffect(() => {
+        if (!session?.accessToken) return;
+
+        let idleTimer: number | null = null;
+        let cancelled = false;
+
+        const resetTimer = () => {
+            if (cancelled) return;
+            if (!session?.accessToken) return;
+            if (idleTimer) window.clearTimeout(idleTimer);
+            idleTimer = window.setTimeout(() => {
+                if (cancelled) return;
+                void logout();
+            }, IDLE_TIMEOUT_MS);
+        };
+
+        const activityEvents: Array<keyof WindowEventMap> = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
+        activityEvents.forEach((evt) => window.addEventListener(evt, resetTimer, { passive: true }));
+        document.addEventListener("visibilitychange", resetTimer);
+        resetTimer();
+
+        return () => {
+            cancelled = true;
+            if (idleTimer) window.clearTimeout(idleTimer);
+            activityEvents.forEach((evt) => window.removeEventListener(evt, resetTimer));
+            document.removeEventListener("visibilitychange", resetTimer);
+        };
+    }, [session?.accessToken, logout]);
 
     const value: AuthContextValue = {
         accessToken: session?.accessToken ?? null,
