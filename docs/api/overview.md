@@ -23,15 +23,17 @@ Production:
 
 ---
 
-## Authentication (if applicable)
+## Authentication
 
-- Auth mechanism: (TBD / document once implemented)
-- Session/token handling: (TBD)
-- Authorization rules: (TBD)
+- Mechanism: Cognito Option‑B (Backend-for-Frontend). Clients talk only to `/auth/cognito/*`; the backend calls Cognito IDP APIs on their behalf.
+- Tokens: `/auth/cognito/login` returns the raw Cognito `access_token`, `id_token`, `refresh_token`, `expires_in`, `token_type`. SPAs store access/id tokens in memory + `sessionStorage` and refresh tokens in `sessionStorage` only.
+- Headers: every protected endpoint requires `Authorization: Bearer <cognito-access-token>`.
+- Email verification is enforced by the backend (`/auth/cognito/verification/{send,confirm}`) before other APIs can be used.
+- CAPTCHA: `/auth/cognito/signup` requires a valid Cloudflare Turnstile token (`turnstile_token`), verified server-side.
 
 Notes:
-- Do not document secret values here.
-- Document header names and flows only.
+- Never document secret values. Reference env var names only.
+- For flow specifics see `docs/api/auth.md`.
 
 ---
 
@@ -78,6 +80,19 @@ High-level expectations:
 For flow details, see:
 - `docs/architecture/data-flow.md`
 - `docs/architecture/security.md`
+
+---
+
+## Bundled responses
+
+To keep the SPA snappy on high-latency networks, some routes intentionally return multiple resource types at once. The primary example is `GET /jobs/{job_id}/details`, which returns:
+
+- `job`: `JobApplicationOut`
+- `notes`: ordered newest → oldest
+- `interviews`: user-scoped interview rows
+- `activity`: timeline entries (default limit 20, clamp 1–200 via `activity_limit`)
+
+The endpoint replaces four sequential requests on the Jobs page, but the underlying single-resource routes remain available for incremental updates (e.g., deleting a note still re-fetches `/jobs/{id}/notes` for truth).
 
 ---
 

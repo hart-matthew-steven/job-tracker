@@ -14,8 +14,10 @@ Update it whenever key entry points or folder structure changes.
   - Auth: `frontend-web/src/pages/auth/*`
   - Core: `frontend-web/src/pages/DashboardPage.tsx`, `frontend-web/src/pages/JobsPage.tsx`
   - Account: `frontend-web/src/pages/account/index.tsx`
+- Auth/session plumbing (tokens + idle timeout): `frontend-web/src/auth/AuthProvider.tsx`
 - UI building blocks:
   - Layout shell: `frontend-web/src/components/layout/AppShell.tsx`
+  - Current user context provider (`src/context/CurrentUserContext.tsx`) shares `useCurrentUser()` state (including `ui_preferences`) across the tree
   - Toasts: `frontend-web/src/components/ui/ToastProvider.tsx`
   - Modal: `frontend-web/src/components/ui/Modal.tsx`
   - Password helpers: `frontend-web/src/lib/passwordPolicy.ts`, `frontend-web/src/components/forms/PasswordRequirements.tsx`
@@ -25,6 +27,7 @@ Update it whenever key entry points or folder structure changes.
 ## Backend (`backend/`)
 - Entry: `backend/app/main.py` (expected)
 - Routes: `backend/app/routes/` (expected)
+  - Job detail bundle lives in `backend/app/routes/job_applications.py` (`GET /jobs/{job_id}/details`)
 - Services: `backend/app/services/` (expected)
 - Core (auth/config/db): `backend/app/core/` (expected)
   - Password policy enforcement helpers: `backend/app/core/password_policy.py`
@@ -42,6 +45,7 @@ Update it whenever key entry points or folder structure changes.
 - Schemas: `backend/app/schemas/` (expected)
 - Backend tests: `backend/tests/` (pytest)
 - Backend env var reference: `backend/.env.example` (generated, names only)
+- User preferences API: `backend/app/routes/users.py` (`/users/me`, `/users/me/settings`, `/users/me/ui-preferences`)
 - Deployment: README "Production deployment (AWS App Runner)" section documents the ECR/App Runner flow (buildx `linux/amd64`, Secrets Manager env injection, `api.jobapptracker.dev` endpoint).
 
 ## Architecture Docs

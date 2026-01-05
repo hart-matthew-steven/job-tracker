@@ -62,9 +62,15 @@ There is **no** profile completion gate anymore. Every authenticated user (custo
 - Access & ID tokens live in memory + sessionStorage. Refresh tokens are persisted in sessionStorage only.
 - `tokenManager` refreshes ~60 s before expiry and deduplicates concurrent refreshes. Failures clear the session and force re-login.
 - There is no legacy refresh-cookie state to revoke; Cognito’s refresh token TTL/rotation apply.
+- Idle protection: the SPA tracks keyboard/mouse/touch/scroll/visibility events and automatically clears the session after ~30 minutes of inactivity (configurable via `VITE_IDLE_TIMEOUT_MINUTES`, minimum 5). This keeps Cognito’s refresh token policy intact while ensuring abandoned tabs redirect to `/login`.
 
 ## MFA Notes
 
 - Cognito User Pool enforces SOFTWARE_TOKEN_MFA (TOTP).
 - `/auth/cognito/mfa/setup` returns `SecretCode` + `otpauth://` for QR rendering but never logs/persists the secret.
 - `/auth/cognito/mfa/verify` finalizes setup and immediately completes the pending login.
+
+## UI Preferences
+
+- Collapsible panels and similar UI toggles are stored per-user in `users.ui_preferences` (JSON).
+- The SPA updates them via `PATCH /users/me/ui-preferences` so the state is consistent across browsers and future native clients.

@@ -52,6 +52,8 @@ Responsibilities:
 - User interface for tracking job applications and statuses
 - Views for notes, documents, and related metadata
 - Communication with the backend via a centralized API client
+- Persists per-user UI preferences (e.g., collapsed cards) by calling `PATCH /users/me/ui-preferences`
+- Automatically signs users out after a period of inactivity (default 30 minutes, configurable via `VITE_IDLE_TIMEOUT_MINUTES`)
 
 Common entry points:
 - `frontend-web/src/main.tsx`
@@ -72,6 +74,8 @@ Responsibilities:
 - API endpoints for job applications, notes, and related resources
 - Data validation, persistence, and error handling
 - Integration with background processing and security services
+- Stores per-user UI preferences in `users.ui_preferences` (JSON) and exposes them via `/users/me/ui-preferences`
+- Optimized job-detail fetch via `GET /jobs/{job_id}/details`, which bundles the job, notes, interviews, and recent activity into one payload for the Jobs page
 
 Typical structure:
 
@@ -191,6 +195,7 @@ After the image is pushed, point the App Runner service at the new ECR tag (or u
 - `.env.example` now only lists Cognito + core infrastructure variables.
 - Frontend auth state lives in memory + `sessionStorage` (access/id tokens) with the refresh token kept in session storage only. Tabs stay in sync via a storage broadcast channel; no data is written to `localStorage`.
 - `tokenManager.ts` centralizes persistence + refresh; API helpers automatically refresh once on 401 before logging the user out.
+- Idle sessions: the SPA logs out automatically after ~30 minutes with no keyboard/mouse/touch activity (configurable via `VITE_IDLE_TIMEOUT_MINUTES`). This keeps Cognito settings unchanged while still expiring abandoned tabs.
 
 ### Security considerations
 
@@ -422,6 +427,8 @@ This repo includes a generated `backend/.env.example` (**names only**, no values
 - The backend is the source of truth; the frontend mirrors the rules for UX-only validation.
 
 - Email verification is enforced by the app: after signup we route users to `/verify` to request/confirm a 6-digit code via Resend (`/auth/cognito/verification/send` + `/auth/cognito/verification/confirm`). If someone tries to log in before verifying, every protected API still returns `403 EMAIL_NOT_VERIFIED` and the UI redirects back to `/verify`. Once verified, the backend marks `users.is_email_verified = true` and syncs `email_verified=true` to Cognito via `AdminUpdateUserAttributes` so native clients stay in sync. Settings + flow docs live in `docs/auth-email-verification.md`.
+- Idle timeout (frontend): `VITE_IDLE_TIMEOUT_MINUTES` (optional, default 30, minimum 5) controls how long the SPA waits before logging out an inactive tab.
+- Idle timeout (frontend): `VITE_IDLE_TIMEOUT_MINUTES` (optional, default 30) controls how long the SPA waits before logging out a tab with no activity.
 
 ## Design Principles
 

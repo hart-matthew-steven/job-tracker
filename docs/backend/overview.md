@@ -41,6 +41,7 @@ This document describes the backend structure and conventions at a high level.
 - Provides a clean API contract to the frontend
 - Handles uploads securely (scan-before-accept)
 - Coordinates async jobs (scan, processing, analytics if added)
+- Serves aggregate payloads when it meaningfully reduces latency. Example: `GET /jobs/{job_id}/details` now returns `{ job, notes, interviews, activity }` in a single call so the Jobs page no longer chains four sequential requests on every selection.
 
 ---
 
@@ -74,6 +75,13 @@ Typical layout:
   - `POST /auth/cognito/verification/send` is a public, rate-limited endpoint that generates a 6-digit code and emails it via Resend (`RESEND_API_KEY`, `RESEND_FROM_EMAIL`).
   - `POST /auth/cognito/verification/confirm` validates the code, sets `users.is_email_verified` + `email_verified_at`, and calls Cognito `AdminUpdateUserAttributes` with `Username = cognito_sub` so AWS reflects the same state.
   - Middleware blocks all other APIs with `403 EMAIL_NOT_VERIFIED` until the DB flag is true (verification endpoints, logout, and `GET /users/me` are allowed so the UI can finish the flow).
+
+---
+
+## UI Preferences
+
+- Per-user UI state (e.g., collapsed cards on the job details page) lives in `users.ui_preferences` (JSON).
+- The SPA persists toggles via `PATCH /users/me/ui-preferences`, allowing the behavior to follow the user across browsers and future native clients.
 
 ---
 

@@ -11,7 +11,7 @@ Record decisions that affect structure or long-term direction.
 
 ---
 
-## 2025-01-XX — Repo hygiene boundaries (docs/logs/temp scripts)
+## 2025-12-18 — Repo hygiene boundaries (docs/logs/temp scripts)
 - Decision: Separate documentation, outputs/logs, and one-off scripts into top-level folders:
   - `docs/` for documentation
   - `logs/` for run output and artifacts
@@ -23,7 +23,7 @@ Record decisions that affect structure or long-term direction.
 
 ---
 
-## 2025-01-XX — Durable AI memory is repo-managed
+## 2025-12-18 — Durable AI memory is repo-managed
 - Decision: Durable “memory” is written to version-controlled docs instead of relying on hidden chat history.
 - Rationale: Predictable context, lower costs, auditable work, easier onboarding for future readers.
 - Consequences:
@@ -32,7 +32,7 @@ Record decisions that affect structure or long-term direction.
 
 ---
 
-## 2025-01-XX — Cursor context control
+## 2025-12-18 — Cursor context control
 - Decision: Commit `.cursorignore` and `.cursor/rules/*` to define predictable AI scope and behavior.
 - Rationale: Reduce accidental context bloat/cost and keep AI behavior consistent across machines.
 - Consequences:
@@ -59,13 +59,63 @@ Record decisions that affect structure or long-term direction.
 
 ---
 
-## 2026-01-02 — Legacy email service removed
-- Decision: Remove the backend email service and associated env vars. Email verification/reset flows are owned by Cognito (and future Cognito-triggered Lambdas) instead of the FastAPI app.
-- Rationale: After the Cognito cutover, the backend no longer sends emails directly; keeping dormant SMTP/SES/Resend code added maintenance and dependency surface without delivering value.
+## 2025-12-18 — User settings persisted on users table
+- Decision: Persist user preference `auto_refresh_seconds` on the `users` table and expose via `/users/me/settings`.
+- Rationale: Keeps a single-user settings surface area small and avoids separate settings tables prematurely.
 - Consequences:
-  - Deleted `app/services/email.py`, its tests, and `resend` dependency.
-  - Removed `EMAIL_*`, `RESEND_API_KEY`, and `SMTP_*` env vars/docs.
-  - Future notification/verification work will live alongside Cognito (e.g., Lambda trigger -> Resend) rather than the FastAPI server.
+  - Future expansion may warrant a dedicated settings table/schema if preferences grow.
+
+---
+
+## 2025-12-19 — Tailwind v4 dark mode uses class-based variant
+- Decision: Configure Tailwind v4 `dark:` to follow the `.dark` class (not `prefers-color-scheme`) using `@custom-variant` in `frontend-web/src/index.css`.
+- Rationale: Enables app-controlled theme switching (dark/light/system) without relying on OS theme.
+- Consequences:
+  - Theme changes apply immediately when toggling `.dark` on `<html>`.
+
+---
+
+## 2025-12-19 — Phase 4 refactor approach: extract modules + shared UI class helpers
+- Decision: Refactor large frontend pages by extracting pure helpers and presentational components into colocated modules (e.g. `frontend-web/src/pages/jobs/*`). Introduce a tiny shared `frontend-web/src/styles/ui.ts` for repeated Tailwind class strings.
+- Rationale: Shrinks large files, reduces duplication, and keeps behavior stable by leaving orchestration/state in the original page while moving UI chunks out.
+- Consequences:
+  - New modules are intentionally “dumb”/presentational; page owns state.
+  - Styling changes are consolidated via shared class constants (still Tailwind; no new deps).
+
+---
+
+## 2025-12-19 — Backend job ownership helpers centralized
+- Decision: Centralize repeated job ownership lookup and tag normalization/tag replacement helpers in `backend/app/services/jobs.py` and import them in jobs-related routers.
+- Rationale: Removes duplication across routers and keeps route modules thinner and more consistent.
+- Consequences:
+  - Routers share a single `get_job_for_user(...)` behavior (404 message/shape remains consistent).
+
+---
+
+## 2025-12-19 — Backend auth + documents route helpers extracted into services
+- Decision: Extract refresh token/cookie helpers into `backend/app/services/refresh_tokens.py` and document presign validation/replacement helpers into `backend/app/services/documents.py`.
+- Rationale: Keep route modules focused on HTTP orchestration and reuse shared policy/validation logic.
+- Consequences:
+  - Auth routes call shared functions for refresh rotation and cookie handling (behavior unchanged).
+  - Document presign endpoint uses shared validation/limits and single-doc replacement logic (behavior unchanged).
+
+---
+
+## 2025-12-19 — Backend standard error response envelope
+- Decision: Add global exception handlers in `backend/app/main.py` so API errors follow the standard `{error, message, details?}` contract documented in `docs/api/error-format.md`.
+- Rationale: Makes frontend error handling consistent and enables stable tests against API error responses.
+- Consequences:
+  - `HTTPException` and request validation errors are consistently shaped.
+  - Tests can assert stable error codes (e.g., `NOT_FOUND`, `UNAUTHORIZED`, `VALIDATION_ERROR`).
+
+---
+
+## 2025-12-19 — Testing strategy: mock API boundaries, avoid UI snapshots
+- Decision: Frontend tests use Vitest + React Testing Library and mock `frontend-web/src/api.ts` rather than snapshot testing or deep component implementation assertions.
+- Rationale: Keeps tests resilient while still validating critical user flows and error handling.
+- Consequences:
+  - Most frontend tests assert on visible text, routing, and API call arguments.
+  - Backend tests use pytest with an in-memory SQLite harness for fast, isolated runs.
 
 ---
 
@@ -114,6 +164,16 @@ Record decisions that affect structure or long-term direction.
   - `/auth/verify` now errors after a link is used once; resending a verification email invalidates any prior link.
   - Access tokens created before a `token_version` bump are rejected (`401`), forcing re-auth even if a refresh token remains.
   - Change-password flow increments `token_version` in addition to revoking refresh tokens.
+
+---
+
+## 2025-12-29 — Legacy email service removed
+- Decision: Remove the backend email service and associated env vars. Email verification/reset flows are owned by Cognito (and future Cognito-triggered Lambdas) instead of the FastAPI app.
+- Rationale: After the Cognito cutover, the backend no longer sends emails directly; keeping dormant SMTP/SES/Resend code added maintenance and dependency surface without delivering value.
+- Consequences:
+  - Deleted `app/services/email.py`, its tests, and `resend` dependency.
+  - Removed `EMAIL_*`, `RESEND_API_KEY`, and `SMTP_*` env vars/docs.
+  - Future notification/verification work will live alongside Cognito (e.g., Lambda trigger -> Resend) rather than the FastAPI server.
 
 ---
 
@@ -213,8 +273,7 @@ Record decisions that affect structure or long-term direction.
   - Documentation (`README.md`, `docs/architecture/cognito-option-b.md`, `docs/user-lifecycle.md`, `docs/ai/*`) now includes the curl-based reference flow.
 
 ---
-
-## 2026-01-02 — Cognito auth migration: production cutover (Chunk 7)
+## 2025-12-31 — Cognito auth migration: production cutover (Chunk 7)
 - Decision: Remove legacy custom auth, rely solely on Cognito-issued tokens (access/id/refresh), and expose the refresh flow via `/auth/cognito/refresh`.
 - Rationale:
   - Simplifies security posture and removes dual-mode edge cases.
@@ -225,7 +284,9 @@ Record decisions that affect structure or long-term direction.
   - SPA stores tokens in memory/sessionStorage; refresh tokens never touch cookies/localStorage.
   - Rate limiting + structured logging tightened around `/auth/cognito/*`.
 
-## 2026-01-03 — Signup bot protection (Chunk 8)
+---
+
+## 2026-01-01 — Signup bot protection (Chunk 8)
 - Decision: Gate `/auth/cognito/signup` behind Cloudflare Turnstile (invisible mode) and verify tokens server-side before calling Cognito.
 - Rationale:
   - Automated signups were the last unguarded way to burn Cognito/email/MFA quota and bootstrap abusive accounts for future AI features.
@@ -236,7 +297,7 @@ Record decisions that affect structure or long-term direction.
   - Signup schema (`CognitoSignupIn`) gained `turnstile_token`. Tests cover happy-path, missing token, verification failure, and network errors.
   - New env vars (`TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `VITE_TURNSTILE_SITE_KEY`) documented in README/docs.
 
-## 2026-01-04 — Cognito emails via Resend (Chunk 9)
+## 2026-01-01 — Cognito emails via Resend (Chunk 9)
 - Decision: Introduce a standalone Cognito Custom Message Lambda (container image) that renders branded templates and sends through Resend’s official Python SDK.
 - Rationale:
   - Cognito’s default SES emails are unbranded and can confuse users; we want consistent messaging from `jobapptracker.dev`.
@@ -247,7 +308,7 @@ Record decisions that affect structure or long-term direction.
   - Lambda fails closed—if Resend errors we raise, so Cognito doesn’t send its fallback email.
   - Documentation: `README.md` (overview + build/push instructions), `docs/auth-cognito-email.md`, and `docs/ai/*` now describe the flow and security posture.
 
-## 2026-01-05 — Retire Cognito email lambda (Chunk 1B cleanup)
+## 2026-01-01 — Retire Cognito email lambda (Chunk 1B cleanup)
 - Decision: Remove the Cognito Custom Message Lambda code/docs because the AWS resources were deleted and the architecture reverted to Cognito’s default email sender.
 - Rationale:
   - Keeping dead code and deployment steps causes drift and confuses runbooks/CI.
@@ -257,7 +318,7 @@ Record decisions that affect structure or long-term direction.
   - `.env.example`, README, and `docs/ai/*` no longer mention Resend-trigger Lambda work; Cognito default emails are documented as the current state.
   - GuardDuty lambda and other services remain untouched.
 
-## 2026-01-06 — Cognito Pre Sign-up Lambda (Chunk 10)
+## 2026-01-02 — Cognito Pre Sign-up Lambda (Chunk 10)
 - Decision: Add a tiny Pre Sign-up Lambda that auto-confirms users and disables Cognito-managed email verification while we own verification out of band.
 - Rationale:
   - Cognito’s default confirmation emails conflict with the planned Resend workflows.
@@ -267,7 +328,7 @@ Record decisions that affect structure or long-term direction.
   - Documentation updated (`README.md`, `docs/auth-cognito-pre-signup.md`, `docs/ai/*`).
   - Lambda performs no network calls or secret access; it only flips response flags.
 
-## 2026-01-07 — App-enforced email verification (Chunk 11)
+## 2026-01-03 — App-enforced email verification (Chunk 11)
 - Decision: Store hashed verification codes in our DB, send via Resend, and block API access until users confirm the code.
 - Rationale:
   - Cognito email confirmation was disabled by the Pre Sign-up Lambda; we still need a trustworthy verification state for AI billing/iOS parity.
@@ -278,62 +339,56 @@ Record decisions that affect structure or long-term direction.
   - Middleware blocks all other APIs with `403 EMAIL_NOT_VERIFIED` until the DB flag is true; verifying also calls Cognito `AdminUpdateUserAttributes` using `Username=cognito_sub`.
   - Frontend exposes resend/cooldown UI on `/verify` and listens for `EMAIL_NOT_VERIFIED` responses to redirect back if someone logs in before completing the flow.
 
----
-
-## 2025-12-18 — User settings persisted on users table
-- Decision: Persist user preference `auto_refresh_seconds` on the `users` table and expose via `/users/me/settings`.
-- Rationale: Keeps a single-user settings surface area small and avoids separate settings tables prematurely.
+## 2026-01-03 — Persist UI preferences on users table
+- Decision: Store panel collapse/expand state (and similar UI toggles) in `users.ui_preferences` (JSON) and expose them via `GET /users/me` + `PATCH /users/me/ui-preferences`.
+- Rationale:
+  - Users expect the UI state to follow them across browsers/devices (and the future iOS client).
+  - Persisting preferences next to the user record keeps the data model simple and avoids localStorage drift.
 - Consequences:
-  - Future expansion may warrant a dedicated settings table/schema if preferences grow.
+  - New migration `20250107_01_add_ui_preferences.py` adds the JSON column with `{}` default.
+  - Backend validates preference keys (`job_details_*_collapsed`) and persists toggles.
+  - Frontend hydrates from `user.ui_preferences` and updates via the new endpoint; state survives page refreshes and device changes.
 
----
-
-## 2025-12-19 — Tailwind v4 dark mode uses class-based variant
-- Decision: Configure Tailwind v4 `dark:` to follow the `.dark` class (not `prefers-color-scheme`) using `@custom-variant` in `frontend-web/src/index.css`.
-- Rationale: Enables app-controlled theme switching (dark/light/system) without relying on OS theme.
+## 2026-01-03 — GuardDuty Lambda pulls scan secret from Secrets Manager
+- Decision: Stop storing the document scan shared secret in Lambda env vars and instead store only the secret ARN (`DOC_SCAN_SHARED_SECRET_ARN`). Lambda fetches the value at runtime via AWS Secrets Manager.
+- Rationale:
+  - Keeps the shared secret out of the function configuration/console.
+  - Aligns with App Runner, which already injects the secret from Secrets Manager.
 - Consequences:
-  - Theme changes apply immediately when toggling `.dark` on `<html>`.
+  - Lambda now requires `secretsmanager:GetSecretValue` permission on the secret ARN.
+  - Backend and Lambda secrets stay in sync via Secrets Manager; the callback header (`X-Scan-Secret`) still guards `/jobs/{job_id}/documents/{document_id}/scan-result`.
+  - Docs (`docs/architecture/security.md`, `docs/architecture/data-flow.md`, `docs/api/endpoints.md`) reference the new path and secret handling.
 
----
-
-## 2025-12-19 — Phase 4 refactor approach: extract modules + shared UI class helpers
-- Decision: Refactor large frontend pages by extracting pure helpers and presentational components into colocated modules (e.g. `frontend-web/src/pages/jobs/*`). Introduce a tiny shared `frontend-web/src/styles/ui.ts` for repeated Tailwind class strings.
-- Rationale: Shrinks large files, reduces duplication, and keeps behavior stable by leaving orchestration/state in the original page while moving UI chunks out.
-- Consequences:
-  - New modules are intentionally “dumb”/presentational; page owns state.
-  - Styling changes are consolidated via shared class constants (still Tailwind; no new deps).
 
 ---
 
-## 2025-12-19 — Backend job ownership helpers centralized
-- Decision: Centralize repeated job ownership lookup and tag normalization/tag replacement helpers in `backend/app/services/jobs.py` and import them in jobs-related routers.
-- Rationale: Removes duplication across routers and keeps route modules thinner and more consistent.
+## 2026-01-04 — SPA idle timeout handled client-side
+- Decision: Add an inactivity timer to the SPA instead of shortening Cognito refresh-token TTLs.
+- Rationale:
+  - Keeps Cognito configuration stable for active SPA/native clients.
+  - Still mitigates risk from abandoned browser tabs on shared machines.
 - Consequences:
-  - Routers share a single `get_job_for_user(...)` behavior (404 message/shape remains consistent).
+  - `AuthProvider` listens to keyboard/mouse/touch/scroll/visibility events and clears the session when the timer expires (default 30 minutes, configurable via `VITE_IDLE_TIMEOUT_MINUTES`, minimum 5).
+  - Idle logout is purely client-side; backend/stateful components are unchanged.
 
 ---
 
-## 2025-12-19 — Backend auth + documents route helpers extracted into services
-- Decision: Extract refresh token/cookie helpers into `backend/app/services/refresh_tokens.py` and document presign validation/replacement helpers into `backend/app/services/documents.py`.
-- Rationale: Keep route modules focused on HTTP orchestration and reuse shared policy/validation logic.
+## 2026-01-04 — Bundled job detail endpoint
+- Decision: Serve job details, notes, interviews, and recent activity from a single endpoint (`GET /jobs/{job_id}/details`).
+- Rationale:
+  - JobsPage previously fired four sequential requests whenever the user selected a job; bundling the data materially reduces latency.
+  - Keeps the incremental endpoints available for follow-up operations (e.g., deleting a note still refreshes `/jobs/{id}/notes`).
 - Consequences:
-  - Auth routes call shared functions for refresh rotation and cookie handling (behavior unchanged).
-  - Document presign endpoint uses shared validation/limits and single-doc replacement logic (behavior unchanged).
+  - Backend schema gained `JobDetailsBundleOut`; tests assert the bundled response shape.
+  - Frontend calls the bundled endpoint first and falls back to `GET /jobs/{id}` only if `job` is missing, keeping existing mutation flows intact.
 
 ---
 
-## 2025-12-19 — Backend standard error response envelope
-- Decision: Add global exception handlers in `backend/app/main.py` so API errors follow the standard `{error, message, details?}` contract documented in `docs/api/error-format.md`.
-- Rationale: Makes frontend error handling consistent and enables stable tests against API error responses.
+## 2026-01-04 — Activity pagination + infinite scroll
+- Decision: Page `/jobs/{id}/activity` with `cursor_id`/`next_cursor` and load additional entries as the user scrolls inside the timeline card.
+- Rationale:
+  - Returning the entire activity history on every selection bloated the payload and pushed the Documents card far down the screen.
+  - Infinite scrolling keeps the UI tight while still letting power users read older activity.
 - Consequences:
-  - `HTTPException` and request validation errors are consistently shaped.
-  - Tests can assert stable error codes (e.g., `NOT_FOUND`, `UNAUTHORIZED`, `VALIDATION_ERROR`).
-
----
-
-## 2025-12-19 — Testing strategy: mock API boundaries, avoid UI snapshots
-- Decision: Frontend tests use Vitest + React Testing Library and mock `frontend-web/src/api.ts` rather than snapshot testing or deep component implementation assertions.
-- Rationale: Keeps tests resilient while still validating critical user flows and error handling.
-- Consequences:
-  - Most frontend tests assert on visible text, routing, and API call arguments.
-  - Backend tests use pytest with an in-memory SQLite harness for fast, isolated runs.
+  - Backend route now returns `{items,next_cursor}` and the details bundle includes the first page of activity plus the cursor.
+  - Frontend timeline renders inside a fixed-height container, automatically requests the next page when the user nears the bottom, and shows a spinner/“scroll to load more” hint.

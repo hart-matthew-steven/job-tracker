@@ -15,3 +15,10 @@ class JobActivityOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class JobActivityPageOut(BaseModel):
+    items: list[JobActivityOut]
+    next_cursor: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+

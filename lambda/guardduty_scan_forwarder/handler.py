@@ -34,7 +34,33 @@ def _load_scan_secret() -> str:
             secret = base64.b64decode(binary).decode("utf-8")
     if not secret:
         raise RuntimeError("DOC_SCAN_SHARED_SECRET secret is empty")
-    return secret.strip()
+
+    secret_value = _extract_secret_value(secret)
+    if not secret_value:
+        raise RuntimeError("DOC_SCAN_SHARED_SECRET secret is empty")
+    return secret_value
+
+
+def _extract_secret_value(raw: str) -> str:
+    candidate = (raw or "").strip()
+    if not candidate:
+        return ""
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return candidate
+
+    if isinstance(parsed, dict):
+        explicit = parsed.get("DOC_SCAN_SHARED_SECRET")
+        if isinstance(explicit, str) and explicit.strip():
+            return explicit.strip()
+        for value in parsed.values():
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    elif isinstance(parsed, str):
+        return parsed.strip()
+
+    return candidate
 
 
 def _parse_document_id_from_key(key: str) -> int | None:
@@ -272,7 +298,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:  # noqa: ARG
 
     Env vars (assumed to exist; managed outside repo):
     - BACKEND_BASE_URL
-    - DOC_SCAN_SHARED_SECRET
+    - DOC_SCAN_SHARED_SECRET_ARN
     """
     backend_base = _env("BACKEND_BASE_URL").rstrip("/")
     secret = _load_scan_secret()

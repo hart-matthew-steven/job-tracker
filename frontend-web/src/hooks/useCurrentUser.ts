@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentUser } from "../api";
 import type { UserMeOut } from "../types/api";
 
@@ -31,7 +31,10 @@ export function useCurrentUser(): UseCurrentUserResult {
     }
   }, []);
 
+  const loadOnceRef = useRef(false);
   useEffect(() => {
+    if (loadOnceRef.current) return;
+    loadOnceRef.current = true;
     reload();
   }, [reload]);
 

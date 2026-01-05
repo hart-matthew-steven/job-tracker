@@ -33,6 +33,12 @@ Non-goals:
 - **Treat uploads as hostile:** untrusted until scanned and explicitly marked clean
 - **No secret material in git:** secrets come from environment or a secret manager
 - **Auditability:** key actions have traceable logs/metadata (without storing secrets)
+- **Expire abandoned sessions:** long-lived refresh tokens stay in Cognito, but the SPA still signs out idle tabs after a fixed window to reduce risk if a workstation is left unlocked.
+
+### Idle session timeout (client-enforced)
+
+- Threat: a valid Cognito session left open on a shared/forgotten device could be abused long after the user leaves.
+- Mitigation: `AuthProvider` tracks keyboard/mouse/touch/scroll/visibility events and clears the Cognito session after ~30 minutes of inactivity (configurable via `VITE_IDLE_TIMEOUT_MINUTES`, minimum 5). This keeps Cognito configuration unchanged (refresh token TTL still 30 days) while ensuring abandoned tabs redirect to `/login` automatically. The timer resets on any interaction so active users aren’t interrupted.
 
 ## Bot Protection (Signup Abuse)
 
@@ -132,9 +138,11 @@ A file is not considered "accepted" until:
       | (if verdict not in event, Lambda calls S3 GetObjectTagging)
       | maps verdict -> CLEAN/INFECTED/ERROR
       |
-      +--> NO_THREATS_FOUND -> backend callback -> DB scan_status=CLEAN (download allowed)
-      +--> THREATS_FOUND    -> backend callback -> DB scan_status=INFECTED (download blocked)
-      +--> ERROR/UNKNOWN    -> backend callback -> DB scan_status=ERROR (download blocked)
+      +--> NO_THREATS_FOUND -> POST /jobs/{job_id}/documents/{document_id}/scan-result -> DB scan_status=CLEAN (download allowed)
+      +--> THREATS_FOUND    -> POST /jobs/{job_id}/documents/{document_id}/scan-result -> DB scan_status=INFECTED (download blocked)
+      +--> ERROR/UNKNOWN    -> POST /jobs/{job_id}/documents/{document_id}/scan-result -> DB scan_status=ERROR (download blocked)
+      |
+      | Legacy internal callback `/internal/documents/{document_id}/scan-result` remains available for manual tooling.
 
 ### Security properties
 
@@ -170,11 +178,10 @@ The Lambda forwarder must be able to read object tags when EventBridge does not 
 
 ### Secrets: Lambda → backend callback
 
-The callback endpoint is protected by a shared secret header:
-- Header: `x-doc-scan-secret` (preferred) or `x-internal-token` (legacy)
-- Value: `DOC_SCAN_SHARED_SECRET` (backend + Lambda env var)
-
-No secrets are committed to git; they are configured via environment variables.
+- Shared-secret header: `X-Scan-Secret` (legacy `X-Doc-Scan-Secret`/`X-Internal-Token` still accepted for internal tools)
+- Backend loads `DOC_SCAN_SHARED_SECRET` from AWS Secrets Manager (App Runner env)
+- Lambda stores only the secret **ARN** (`DOC_SCAN_SHARED_SECRET_ARN`) as an env var and fetches the value at runtime via `secretsmanager:GetSecretValue`
+- No secret values are committed to git
 
 ---
 

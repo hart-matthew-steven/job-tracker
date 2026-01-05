@@ -65,6 +65,19 @@ Optional (future):
 
 ---
 
+## 2.5) Load a job’s full detail view (bundled endpoint)
+
+    [FE] --(GET /jobs/{job_id}/details?activity_limit=20)--> [API] --> [DB]
+      ^                                                         |
+      |                                                         +--> notes (ordered newest→oldest)
+      |                                                         +--> interviews (user-scoped)
+      |                                                         +--> job activity (limited slice)
+      +----------------(single JSON payload with {job,notes,interviews,activity})---------------+
+
+Why: JobsPage used to fire four sequential requests (`GET /jobs/{id}`, `/notes`, `/interviews`, `/activity`). The new endpoint returns the entire bundle in one round trip so the UI hydrates immediately and latency stays low even on high-RTT networks. The `activity_limit` query param defaults to 20 (min 1, max 200) so the frontend can request a smaller slice when needed.
+
+---
+
 ## 3) Upload a document (resume, cover letter, etc.)
 
 ### States (implemented)
@@ -100,19 +113,21 @@ There are two related fields:
       v
     [Lambda: guardduty_scan_forwarder]
       |
-      | extracts document_id from S3 key
+      | extracts document_id + job_id from S3 key
       | verdict source of truth: S3 object tag GuardDutyMalwareScanStatus
       | (if verdict not in event, Lambda calls S3 GetObjectTagging)
       | maps verdict -> CLEAN/INFECTED/ERROR
       |
-      +--> NO_THREATS_FOUND -> POST /internal/documents/{document_id}/scan-result (token)
+      +--> NO_THREATS_FOUND -> POST /jobs/{job_id}/documents/{document_id}/scan-result (X-Scan-Secret)
       |                         updates scan_status=CLEAN; status=uploaded
       |
-      +--> THREATS_FOUND    -> POST /internal/documents/{document_id}/scan-result (token)
+      +--> THREATS_FOUND    -> POST /jobs/{job_id}/documents/{document_id}/scan-result (X-Scan-Secret)
       |                         updates scan_status=INFECTED; status=infected
       |
-      +--> ERROR/UNKNOWN    -> POST /internal/documents/{document_id}/scan-result (token)
+      +--> ERROR/UNKNOWN    -> POST /jobs/{job_id}/documents/{document_id}/scan-result (X-Scan-Secret)
                                updates scan_status=ERROR; status=failed
+      |
+      | (Legacy internal endpoint `/internal/documents/{document_id}/scan-result` remains for manual/debug callbacks)
 
 Security properties:
 - Files are treated as hostile until scan_status == CLEAN.
@@ -122,9 +137,8 @@ Security properties:
 
 ### Dev note (current)
 
-The backend is not hosted in AWS yet. Lambda calls the backend through **ngrok**:
-
-    [Lambda] --> https://<ngrok-subdomain>.ngrok.app/internal/documents/... (x-doc-scan-secret)
+- In production the Lambda calls the App Runner API directly (e.g., `https://api.jobapptracker.dev/jobs/.../scan-result`).
+- For local testing you can still point the Lambda at an ngrok tunnel, but production traffic no longer relies on ngrok.
 
 ---
 

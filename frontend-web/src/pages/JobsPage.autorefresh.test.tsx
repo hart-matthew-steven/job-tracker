@@ -3,6 +3,8 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 import { ToastProvider } from "../components/ui/ToastProvider";
+import { CurrentUserProvider } from "../context/CurrentUserContext";
+import type { UseCurrentUserResult } from "../hooks/useCurrentUser";
 
 vi.mock("../hooks/useSettings", () => {
   return {
@@ -21,6 +23,7 @@ vi.mock("../hooks/useSettings", () => {
 const api = {
   listJobs: vi.fn(),
   getJob: vi.fn(),
+  getJobDetails: vi.fn(),
   createJob: vi.fn(),
   patchJob: vi.fn(),
   listNotes: vi.fn(),
@@ -34,9 +37,12 @@ const api = {
   createInterview: vi.fn(),
   deleteInterview: vi.fn(),
   listInterviews: vi.fn(),
+  updateUiPreferences: vi.fn(),
 };
 
 vi.mock("../api", () => api);
+
+const emptyActivityPage = { items: [], next_cursor: null };
 
 vi.mock("../components/documents/DocumentsPanel", () => ({
   default: () => <div data-testid="DocumentsPanel" />,
@@ -57,6 +63,22 @@ vi.mock("../components/jobs/JobCard", () => ({
   default: () => <div>Job form stub</div>,
 }));
 
+const currentUserValue: UseCurrentUserResult = {
+  user: {
+    id: 1,
+    email: "test@example.com",
+    name: "Test User",
+    auto_refresh_seconds: 0,
+    created_at: new Date().toISOString(),
+    is_email_verified: true,
+    ui_preferences: {},
+  },
+  loading: false,
+  error: "",
+  reload: vi.fn().mockResolvedValue(),
+  isStub: false,
+};
+
 async function renderPage() {
   window.scrollTo = vi.fn() as typeof window.scrollTo;
   globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
@@ -69,7 +91,9 @@ async function renderPage() {
 
   return render(
     <ToastProvider>
-      <JobsPage />
+      <CurrentUserProvider value={currentUserValue}>
+        <JobsPage />
+      </CurrentUserProvider>
     </ToastProvider>
   );
 }
@@ -80,6 +104,13 @@ describe("JobsPage (auto-refresh)", () => {
     vi.clearAllMocks();
     api.listSavedViews.mockResolvedValue([]);
     api.listJobs.mockResolvedValue([]);
+    api.listJobActivity.mockResolvedValue(emptyActivityPage);
+    api.getJobDetails.mockResolvedValue({
+      job: null,
+      notes: [],
+      interviews: [],
+      activity: emptyActivityPage,
+    });
   });
 
   afterEach(() => {

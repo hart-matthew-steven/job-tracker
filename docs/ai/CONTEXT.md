@@ -21,6 +21,8 @@ Primary goals:
 - Tests: Vitest + React Testing Library
 - Shared password policy helper in `src/lib/passwordPolicy.ts`
 - Password requirements UI (`src/components/forms/PasswordRequirements.tsx`) blocks weak passwords on Register/Change Password
+- Per-user UI preferences (e.g., collapsed cards) are persisted via `PATCH /users/me/ui-preferences` and hydrated through a shared `CurrentUserProvider`.
+- `AuthProvider` centralizes Cognito token storage/logout and now enforces a client-side idle timeout (default ~30 minutes, configurable via `VITE_IDLE_TIMEOUT_MINUTES`, minimum 5). Mouse/keyboard/touch/scroll/visibility events reset the timer; idle tabs are logged out automatically.
 
 ### Backend (`backend/`)
 - FastAPI + SQLAlchemy ORM + Alembic migrations on Postgres.
@@ -28,14 +30,15 @@ Primary goals:
 - AWS SDK: `boto3` (Cognito IdP, S3 uploads, GuardDuty callbacks).
 - Tests: pytest.
 - Password policy enforced via `app/core/password_policy.py` (length, upper/lowercase, number, special char, denylist, no name/email substrings).
-- Users: `users` table stores `email`, `name`, `cognito_sub`, `auth_provider`. Identity middleware JIT-provisions a row on first successful login and attaches it to every request.
+- Users: `users` table stores `email`, `name`, `cognito_sub`, `auth_provider`, plus JSON `ui_preferences` for persisted UI state. Identity middleware JIT-provisions a row on first successful login and attaches it to every request.
 - Database access split between least-privilege runtime (`DB_APP_USER`) and migrations (`DB_MIGRATOR_USER`) credentials.
 - Production hosting: AWS App Runner pulling images from ECR, fronted by `https://api.jobapptracker.dev`; runtime secrets come from AWS Secrets Manager env injects. GitHub Actions (`backend-deploy.yml`) builds/pushes to ECR and drives App Runner updates via `scripts/deploy_apprunner.py`.
+- Job detail hydration is consolidated behind `GET /jobs/{job_id}/details`, which returns `{job, notes, interviews, activity}` in one request so the Jobs page no longer issues four sequential calls on every selection. The legacy per-resource endpoints remain for incremental updates.
 
 ## AWS / External Services (current)
 - **Email/Verification**: handled by Cognito (and future Cognito-triggered Lambda → Resend). No direct SMTP/SES integration in the FastAPI backend.
 - **S3**: job document upload flow via presigned URLs (see `/jobs/{job_id}/documents/*`)
-- **GuardDuty Malware Protection for S3**: AWS-managed malware scanning for uploaded documents. EventBridge triggers a Lambda forwarder, which updates the backend document `scan_status`. The GuardDuty verdict is sourced from the S3 object tag `GuardDutyMalwareScanStatus` (Lambda falls back to S3 `GetObjectTagging` if the event payload does not include tags). GuardDuty callbacks are feature-gated via `GUARD_DUTY_ENABLED` so local Docker runs can noop safely.
+- **GuardDuty Malware Protection for S3**: AWS-managed malware scanning for uploaded documents. EventBridge triggers a Lambda forwarder, which updates the backend document `scan_status` by calling `/jobs/{job_id}/documents/{document_id}/scan-result` with a shared secret fetched from AWS Secrets Manager (Lambda stores only the secret ARN). The GuardDuty verdict is sourced from the S3 object tag `GuardDutyMalwareScanStatus` (Lambda falls back to S3 `GetObjectTagging` if the event payload does not include tags). GuardDuty callbacks are feature-gated via `GUARD_DUTY_ENABLED` so local Docker runs can noop safely.
 - **App Runner**: hosts the backend container, pulls from ECR with `linux/amd64` images, injects env vars from Secrets Manager, handles health checks routed through `/health`.
 
 ## Cognito Auth (production state)

@@ -1,6 +1,6 @@
 # app/models/user.py
 """User model for Cognito-backed authentication."""
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, func
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, func, JSON
 from sqlalchemy.orm import relationship
 
 from app.core.base import Base
@@ -29,6 +29,8 @@ class User(Base):
     default_jobs_view = Column(String(30), nullable=False, server_default="all")
     # Data retention in days (0 = keep forever)
     data_retention_days = Column(Integer, nullable=False, server_default="0")
+    # UI preferences blob (collapsed panels, etc.)
+    ui_preferences = Column(JSON, nullable=False, server_default="{}")
 
     # --- Status flags ---
     is_active = Column(Boolean, nullable=False, server_default="true")

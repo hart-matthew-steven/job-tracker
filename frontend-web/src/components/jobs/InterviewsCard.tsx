@@ -87,13 +87,15 @@ export default function InterviewsCard({
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-2">
           <div className="text-xl font-semibold">Interviews</div>
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="rounded-lg px-3 py-2 text-xs font-semibold transition border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
-          >
-            + Add interview
-          </button>
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="rounded-lg px-3 py-2 text-xs font-semibold transition border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              + Add interview
+            </button>
+          )}
         </div>
         {onToggleCollapse && (
           <div className="ml-auto">

@@ -74,6 +74,7 @@ Guidelines:
 
 - `GET /users/me`
   - Auth: Bearer
+  - Response: includes `ui_preferences` JSON for persisted UI state (collapsed cards, etc.)
 
 - `POST /users/me/change-password`
   - Auth: Bearer
@@ -86,23 +87,46 @@ Guidelines:
   - Auth: Bearer
   - Body: `{ "auto_refresh_seconds": 0|10|30|60 }`
 
+- `PATCH /users/me/ui-preferences`
+  - Auth: Bearer
+  - Body: `{ "preferences": { "job_details_notes_collapsed": true } }`
+  - Notes: persists SPA/UI toggles (e.g., collapsed panels) across devices.
+
 ---
 
 ## Jobs
 
 - `GET /jobs`
   - Auth: Bearer
+  - Notes: Supports `q`, `status[]`, `tag[]`, `tag_q` filters.
 
 - `POST /jobs`
   - Auth: Bearer
+  - Body: `JobApplicationCreate`
 
 - `GET /jobs/{job_id}`
   - Auth: Bearer
 
+- `GET /jobs/{job_id}/details`
+  - Auth: Bearer
+  - Query: `activity_limit` (default 20, 1–200)
+  - Notes: Returns `{ job, notes, interviews, activity: { items, next_cursor } }` so the Jobs page can hydrate in one request. Use `next_cursor` to fetch additional activity via `/jobs/{job_id}/activity`.
+
 - `PATCH /jobs/{job_id}`
   - Auth: Bearer
+  - Body: `JobApplicationUpdate`
+  - Notes: Tag/status changes log activity entries.
 
-## Notes
+### Activity
+
+- `GET /jobs/{job_id}/activity`
+  - Auth: Bearer
+  - Query:
+    - `limit` (default 20, 1–200)
+    - `cursor_id` (optional) — fetch entries older than the given activity id
+  - Response: `{ items: JobActivity[], next_cursor: number | null }`. Continue requesting with `cursor_id = next_cursor` until it returns `null`.
+
+### Notes
 
 - `GET /jobs/{job_id}/notes`
   - Auth: Bearer
@@ -113,7 +137,23 @@ Guidelines:
 - `DELETE /jobs/{job_id}/notes/{note_id}`
   - Auth: Bearer
 
-## Documents
+### Interviews
+
+- `GET /jobs/{job_id}/interviews`
+  - Auth: Bearer
+
+- `POST /jobs/{job_id}/interviews`
+  - Auth: Bearer
+  - Body: `JobInterviewCreate`
+
+- `PATCH /jobs/{job_id}/interviews/{interview_id}`
+  - Auth: Bearer
+  - Body: `JobInterviewUpdate`
+
+- `DELETE /jobs/{job_id}/interviews/{interview_id}`
+  - Auth: Bearer
+
+### Documents
 
 - `GET /jobs/{job_id}/documents`
   - Auth: Bearer
@@ -129,6 +169,36 @@ Guidelines:
 
 - `DELETE /jobs/{job_id}/documents/{doc_id}`
   - Auth: Bearer
+
+- `POST /jobs/{job_id}/documents/{document_id}/scan-result`
+  - Auth: Shared secret (`X-Scan-Secret`)
+  - Notes: GuardDuty → backend scan callback path.
+
+## Saved Views
+
+- `GET /saved-views`
+  - Auth: Bearer
+
+- `POST /saved-views`
+  - Auth: Bearer
+  - Body: `SavedViewCreate`
+
+- `PATCH /saved-views/{view_id}`
+  - Auth: Bearer
+  - Body: `SavedViewUpdate`
+
+- `DELETE /saved-views/{view_id}`
+  - Auth: Bearer
+
+## Internal (GuardDuty/Lambda)
+
+- `GET /internal/documents/{doc_id}`
+  - Auth: Shared secret header (`X-Doc-Scan-Secret` preferred)
+  - Notes: Debug helper to inspect scan status when GuardDuty is enabled.
+
+- `POST /internal/documents/{doc_id}/scan-result`
+  - Auth: Shared secret header
+  - Notes: Legacy callback path; GuardDuty forwarder now uses `/jobs/{job_id}/documents/{document_id}/scan-result`.
 
 ---
 

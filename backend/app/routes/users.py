@@ -1,16 +1,28 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.schemas.common import MessageOut
-from app.schemas.user import UpdateSettingsIn, UserMeOut, UserSettingsOut
+from app.schemas.user import (
+    UpdateSettingsIn,
+    UpdateUiPreferencesIn,
+    UiPreferencesOut,
+    UserMeOut,
+    UserSettingsOut,
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
+UI_COLLAPSE_PREF_KEYS = {
+    "job_details_notes_collapsed",
+    "job_details_interviews_collapsed",
+    "job_details_timeline_collapsed",
+    "job_details_documents_collapsed",
+}
 
 @router.get("/me", response_model=UserMeOut)
 def get_me(user: User = Depends(get_current_user)) -> UserMeOut:
@@ -22,6 +34,7 @@ def get_me(user: User = Depends(get_current_user)) -> UserMeOut:
         created_at=user.created_at,
         is_email_verified=getattr(user, "is_email_verified", False),
         email_verified_at=getattr(user, "email_verified_at", None),
+        ui_preferences=(getattr(user, "ui_preferences", None) or {}) if hasattr(user, "ui_preferences") else {},
     )
 
 
@@ -44,5 +57,24 @@ def update_my_settings(
     db.add(user)
     db.commit()
     return {"message": "Settings updated"}
+
+
+@router.patch("/me/ui-preferences", response_model=UiPreferencesOut)
+def update_ui_preferences(
+    payload: UpdateUiPreferencesIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> UiPreferencesOut:
+    prefs = dict(getattr(user, "ui_preferences", {}) or {})
+    for key, value in payload.preferences.items():
+        if key not in UI_COLLAPSE_PREF_KEYS:
+            raise HTTPException(status_code=400, detail=f"Unknown preference key: {key}")
+        prefs[key] = bool(value)
+
+    user.ui_preferences = prefs
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return UiPreferencesOut(ui_preferences=prefs)
 
 
