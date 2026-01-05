@@ -42,6 +42,10 @@
 - Backend & frontend deployment automation:
   - `backend-deploy.yml` builds/pushes the API image, assumes AWS role via OIDC, and calls `scripts/deploy_apprunner.py` for zero-downtime deploys with rollback + health checks.
   - `frontend-deploy.yml` builds the Vite SPA, versions releases in S3 via `scripts/deploy_frontend.py`, promotes them, invalidates CloudFront, and records release metadata for rollbacks.
+- UX polish (2026-01-05):
+  - Mobile AppShell now mirrors desktop by keeping the search pill and “Create job” CTA in the header; the drawer is nav-only.
+  - Added regression tests around the Board Drawer’s status change flow to ensure the drawer no longer flickers or reloads when saving.
+- Landing page refresh + public demo board: `/` messaging no longer references “private alpha”/Jira, and `/demo/board` lets prospects explore a read-only kanban preview before creating an account.
 - **Phase 8: Malware scanning pipeline** (GuardDuty Malware Protection for S3):
   - Migrated from ClamAV-based scanning to AWS GuardDuty for production reliability
   - Removed: ClamAV Lambda code, SQS triggers, EFS definitions, quarantine logic

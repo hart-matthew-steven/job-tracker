@@ -60,8 +60,38 @@
 - **Name is mandatory**: `users.name` is NOT NULL, enforced at signup (both custom and Cognito flows).
 - **JIT provisioning**: `ensure_cognito_user` creates a user if `cognito_sub` not known; rejects silent linking if an email already exists.
 - **MFA**: Because Cognito is configured for required TOTP, every login flows through the backend challenge contract. The SPA never needs AWS credentials or to know Cognito challenge semantics.
-- **Pre Sign-up Lambda**: `lambda/cognito_pre_signup/` auto-confirms users and keeps `autoVerifyEmail=false` so the product can own verification flows later without Cognito emails firing.
-- **App-enforced email verification**: `/auth/cognito/verification/send` + `/auth/cognito/verification/confirm` are public so users can verify before their first login; they manage hashed codes in our DB, deliver via Resend, and call `AdminUpdateUserAttributes` (`Username=cognito_sub`) so Cognito reflects the same `email_verified` state.
+- **Pre Sign-up Lambda (Chunk 10)**: `lambda/cognito_pre_signup/` is wired to the Cognito Pre Sign-up trigger. It sets `event.response.autoConfirmUser = true` and `event.response.autoVerifyEmail = false`, performs no network calls, and simply logs the trigger source. This prevents Cognito from emailing codes while keeping accounts in `CONFIRMED` state immediately, so our application logic decides when to send verification mail.
+- **App-enforced email verification (Chunk 11)**: `/auth/cognito/verification/send` + `/auth/cognito/verification/confirm` are public so users can verify before their first login. The backend generates 6-digit codes, stores only salted SHA-256 hashes with TTL/cooldown/attempt caps, delivers via Resend, and on success sets `users.is_email_verified = true`, `users.email_verified_at`, and calls `AdminUpdateUserAttributes` (`Username=cognito_sub`, `email_verified=true`) to keep Cognito/iOS clients consistent.
+
+## Email Verification Flow (detailed)
+
+1. **Signup**
+   - `/auth/cognito/signup` receives `{email,password,name,turnstile_token}`.
+   - Backend verifies the Turnstile token, enforces password policy, and forwards to Cognito `SignUp`.
+   - Pre Sign-up Lambda auto-confirms users and suppresses Cognito’s built-in email.
+   - When email verification is enabled, the backend immediately creates a verification code and sends it via Resend so the UI can route to `/verify`.
+
+2. **Request code (`/auth/cognito/verification/send`)**
+   - Public, rate-limited endpoint (email only).
+   - Generates a 6-digit code, stores `{code_hash, code_salt, expires_at, resend_available_at, attempts}` in `email_verification_codes`.
+   - Enforces one active code per user; previous codes are invalidated on resend.
+   - Returns a generic success response with `resend_available_in_seconds` to drive the UI cooldown, without leaking whether the email exists.
+
+3. **Confirm code (`/auth/cognito/verification/confirm`)**
+   - Public endpoint (no auth required).
+   - Validates hash/TTL/attempts. On success:
+     - Marks the DB user verified (`is_email_verified=True`, `email_verified_at=now()`).
+     - Calls `cognito_admin_mark_email_verified` → Cognito `AdminUpdateUserAttributes` (`Username=cognito_sub`, `email_verified=true`).
+     - Consumes the code so reuse fails.
+   - Failures increment `attempts` and return safe error codes.
+
+4. **Middleware enforcement**
+   - Identity middleware allows only verification endpoints, logout, and `GET /users/me` until the DB flag is true.
+   - Any 403 with `EMAIL_NOT_VERIFIED` triggers a frontend redirect back to `/verify`.
+
+5. **Future clients**
+   - Because Cognito receives `email_verified=true`, native clients can rely on the Cognito attribute without additional API calls.
+   - Resend delivery + hashed storage ensures verification remains auditable and GDPR/AI-billing friendly.
 
 ## Files
 

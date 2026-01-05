@@ -1,14 +1,18 @@
 export const ROUTES = {
-  // Auth (public)
+  // Public
+  home: "/",
   login: "/login",
   register: "/register",
+  demoBoard: "/demo/board",
   verify: "/verify",
   mfaSetup: "/mfa/setup",
   mfaChallenge: "/mfa/code",
 
   // App (protected)
-  dashboard: "/",
+  dashboard: "/board",
+  board: "/board",
   jobs: "/jobs",
+  insights: "/insights",
 
   // Account (protected)
   profile: "/profile",

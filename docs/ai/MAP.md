@@ -14,9 +14,11 @@ Update it whenever key entry points or folder structure changes.
   - Auth: `frontend-web/src/pages/auth/*`
   - Core: `frontend-web/src/pages/DashboardPage.tsx`, `frontend-web/src/pages/JobsPage.tsx`
   - Account: `frontend-web/src/pages/account/index.tsx`
+  - Marketing/demo: `frontend-web/src/pages/landing/LandingPage.tsx` (hero + CTA) and `frontend-web/src/pages/landing/DemoBoardPage.tsx` (read-only board preview for unauthenticated visitors)
 - Auth/session plumbing (tokens + idle timeout): `frontend-web/src/auth/AuthProvider.tsx`
 - UI building blocks:
   - Layout shell: `frontend-web/src/components/layout/AppShell.tsx`
+    - Handles both desktop nav rail and mobile drawer; header always exposes search + “Create job” so primary actions never hide behind the drawer.
   - Current user context provider (`src/context/CurrentUserContext.tsx`) shares `useCurrentUser()` state (including `ui_preferences`) across the tree
   - Toasts: `frontend-web/src/components/ui/ToastProvider.tsx`
   - Modal: `frontend-web/src/components/ui/Modal.tsx`
@@ -52,8 +54,7 @@ Update it whenever key entry points or folder structure changes.
 - Overview: `docs/architecture/overview.md`
 - Data flow: `docs/architecture/data-flow.md`
 - Security: `docs/architecture/security.md`
-- Cognito Option B (BFF): `docs/architecture/cognito-option-b.md`
-- Pre sign-up Lambda: `docs/auth-cognito-pre-signup.md`
+- Cognito Option B (BFF) + Pre Sign-up + Email verification: `docs/architecture/cognito-option-b.md`
 
 ## Lambdas
 - GuardDuty forwarding Lambda: `lambda/guardduty_scan_forwarder/`

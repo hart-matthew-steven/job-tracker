@@ -24,6 +24,8 @@ import type {
   UpdateUiPreferencesIn,
   UiPreferencesOut,
   JobDetailsBundle,
+  JobsBoardResponse,
+  ActivityMetrics,
 } from "./types/api";
 
 import API_BASE from "./lib/apiBase";
@@ -371,6 +373,20 @@ export function patchJob(jobId: number | string, payload: PatchJobIn): Promise<J
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+export function getBoardSnapshot(): Promise<JobsBoardResponse> {
+  return requestJson<JobsBoardResponse>(`/jobs/board`);
+}
+
+export function searchBoardJobs(query: string): Promise<JobsBoardResponse> {
+  const params = new URLSearchParams();
+  params.set("q", query);
+  return requestJson<JobsBoardResponse>(`/jobs/search?${params.toString()}`);
+}
+
+export function getActivityPulse(rangeDays = 7): Promise<ActivityMetrics> {
+  return requestJson<ActivityMetrics>(`/jobs/metrics/activity?range_days=${rangeDays}`);
 }
 
 /** -------------------

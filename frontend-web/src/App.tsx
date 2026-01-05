@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 import DashboardPage from "./pages/DashboardPage";
 import JobsPage from "./pages/JobsPage";
+import BoardPage from "./pages/BoardPage";
 
 import { useAuth } from "./auth/AuthProvider";
 import { subscribeToEmailVerificationRequired } from "./api";
@@ -20,6 +21,8 @@ import MfaChallengePage from "./pages/auth/MfaChallengePage";
 import AppShell from "./components/layout/AppShell";
 import { ChangePasswordPage, ProfilePage, SettingsPage } from "./pages/account";
 import { ROUTES } from "./routes/paths";
+import LandingPage from "./pages/landing/LandingPage";
+import DemoBoardPage from "./pages/landing/DemoBoardPage";
 
 function EmailVerificationListener() {
   const navigate = useNavigate();
@@ -48,6 +51,9 @@ export default function App() {
     <BrowserRouter>
       <EmailVerificationListener />
       <Routes>
+        <Route path={ROUTES.home} element={<LandingPage />} />
+        <Route path={ROUTES.demoBoard} element={<DemoBoardPage />} />
+
         {/* Auth routes */}
         <Route
           element={
@@ -74,15 +80,16 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route path={ROUTES.dashboard} element={<DashboardPage />} />
+          <Route path={ROUTES.board} element={<BoardPage />} />
           <Route path={ROUTES.jobs} element={<JobsPage />} />
+          <Route path={ROUTES.insights} element={<DashboardPage />} />
           <Route path={ROUTES.profile} element={<ProfilePage />} />
           <Route path={ROUTES.settings} element={<SettingsPage />} />
           <Route path={ROUTES.changePassword} element={<ChangePasswordPage />} />
         </Route>
 
         {/* Fallback */}
-        <Route path="*" element={<Navigate to={ROUTES.dashboard} replace />} />
+        <Route path="*" element={<Navigate to={ROUTES.board} replace />} />
       </Routes>
     </BrowserRouter>
   );

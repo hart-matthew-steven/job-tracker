@@ -89,3 +89,41 @@ def test_activity_pagination(client):
     # ensure we received the next set and cursor eventually becomes null
     if len(data2["items"]) == 3:
         assert data2["next_cursor"] is None or isinstance(data2["next_cursor"], int)
+
+
+def test_board_view_includes_follow_up_flags(client):
+    job = client.post(
+        "/jobs/",
+        json={"company_name": "Acme", "job_title": "Engineer", "location": "Remote", "status": "applied"},
+    ).json()
+    job2 = client.post(
+        "/jobs/",
+        json={"company_name": "Globex", "job_title": "Designer", "location": "NYC", "status": "interviewing"},
+    ).json()
+
+    # Set next action on job2
+    client.patch(
+        f"/jobs/{job2['id']}",
+        json={"next_action_title": "Send thank-you note"},
+    )
+
+    board = client.get("/jobs/board")
+    assert board.status_code == 200
+    payload = board.json()
+    assert "statuses" in payload
+    assert any(card["id"] == job["id"] for card in payload["jobs"])
+    assert any(card["id"] == job2["id"] for card in payload["jobs"])
+
+
+def test_job_search_finds_notes(client):
+    job = client.post(
+        "/jobs/",
+        json={"company_name": "Umbrella", "job_title": "Security Analyst", "location": "Raccoon City"},
+    ).json()
+    client.post(f"/jobs/{job['id']}/notes", json={"body": "Discuss biohazard protocols"})
+
+    res = client.get("/jobs/search", params={"q": "biohazard"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["jobs"]
+    assert any(card["company_name"] == "Umbrella" for card in data["jobs"])

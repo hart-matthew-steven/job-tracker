@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from zoneinfo import ZoneInfo
 
 from app.schemas.job_application_note import NoteOut
@@ -17,6 +17,9 @@ class JobApplicationCreate(BaseModel):
     applied_date: Optional[date] = None
     job_url: Optional[str] = None
     tags: Optional[List[str]] = None
+    priority: Optional[str] = "normal"
+    next_action_at: Optional[datetime] = None
+    next_action_title: Optional[str] = None
 
 
 class JobApplicationOut(BaseModel):
@@ -30,6 +33,10 @@ class JobApplicationOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_activity_at: Optional[datetime] = None
+    last_action_at: Optional[datetime] = None
+    next_action_at: Optional[datetime] = None
+    next_action_title: Optional[str] = None
+    priority: str = "normal"
     tags: List[str] = []
 
     @field_validator("tags", mode="before")
@@ -52,7 +59,7 @@ class JobApplicationOut(BaseModel):
             return out
         return v
 
-    @field_serializer("created_at", "updated_at", "last_activity_at")
+    @field_serializer("created_at", "updated_at", "last_activity_at", "last_action_at", "next_action_at")
     def serialize_dt(self, dt: Optional[datetime]):
         if dt is None: 
                 return None
@@ -70,5 +77,37 @@ class JobDetailsBundleOut(BaseModel):
     notes: List[NoteOut]
     interviews: List[JobInterviewOut]
     activity: JobActivityPageOut
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class JobBoardCardOut(BaseModel):
+    id: int
+    status: str
+    company_name: str
+    job_title: str
+    location: Optional[str] = None
+    updated_at: datetime
+    last_activity_at: Optional[datetime] = None
+    last_action_at: Optional[datetime] = None
+    next_action_at: Optional[datetime] = None
+    next_action_title: Optional[str] = None
+    priority: str = "normal"
+    tags: List[str] = []
+    needs_follow_up: bool = False
+
+    @field_serializer("updated_at", "last_activity_at", "last_action_at", "next_action_at")
+    def serialize_dt(self, dt: Optional[datetime]):
+        if dt is None:
+            return None
+        return dt.astimezone(ET)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class JobsBoardOut(BaseModel):
+    statuses: List[str]
+    jobs: List[JobBoardCardOut]
+    meta: Dict[str, Any] = {}
 
     model_config = ConfigDict(from_attributes=True)

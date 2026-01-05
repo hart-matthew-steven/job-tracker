@@ -26,6 +26,8 @@ Non-goals:
 - Calls the backend via a centralized API client
 - Runs locally in dev (`npm run dev`)
 - Deployed separately from the backend in production (implementation can vary)
+- Public marketing routes (`/` + `/demo/board`) showcase the product without hitting backend APIs; `/demo/board` renders a static, read-only board preview for prospects who have not created an account yet.
+- Navigation shell keeps primary actions (global search, “Create job”) in the header for every breakpoint. On mobile the drawer is nav-only; keeping actions inline prevents workflow divergence between devices.
 
 ### Backend API (Python)
 - Owns business logic and data persistence

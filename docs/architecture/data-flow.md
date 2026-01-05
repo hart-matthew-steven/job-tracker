@@ -50,6 +50,7 @@ This document describes how data moves through the system. It is written to be i
 Key properties:
 - Backend is the source of truth.
 - Frontend remains thin and presentation-focused.
+- Marketing/demo routes (`/` and `/demo/board`) are purely client-side; `/demo/board` renders seeded data without touching the backend so prospects can explore the board before authenticating.
 
 ---
 

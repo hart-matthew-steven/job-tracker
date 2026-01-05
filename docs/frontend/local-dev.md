@@ -29,6 +29,8 @@ npm run dev
 
 Optional: set `VITE_IDLE_TIMEOUT_MINUTES` to override the default 30-minute idle logout timer during local testing.
 
+Note: `/demo/board` is a static preview that renders seeded data without calling the backend, so it works even if the API is offline. Use it when building marketing tweaks or debugging the landing CTA flow.
+
 ---
 
 ## Backend Connectivity

@@ -270,7 +270,7 @@ Record decisions that affect structure or long-term direction.
   - `/auth/cognito/mfa/setup` returns `{secret_code, otpauth_uri, session}`; `/auth/cognito/mfa/verify` responds to the `MFA_SETUP` challenge with `ANSWER=SUCCESS`.
   - `/auth/cognito/challenge` expects explicit `responses` (e.g., `SOFTWARE_TOKEN_MFA_CODE`) and always echoes `session` + `next_step`.
   - Tests (`tests/test_auth_cognito_bff.py`) cover login OK, MFA_SETUP, SOFTWARE_TOKEN_MFA, OTP setup/verify, and refresh-cookie issuance.
-  - Documentation (`README.md`, `docs/architecture/cognito-option-b.md`, `docs/user-lifecycle.md`, `docs/ai/*`) now includes the curl-based reference flow.
+  - Documentation (`README.md`, `docs/architecture/cognito-option-b.md`, `docs/architecture/security.md`, `docs/ai/*`) now includes the curl-based reference flow.
 
 ---
 ## 2025-12-31 — Cognito auth migration: production cutover (Chunk 7)
@@ -325,7 +325,7 @@ Record decisions that affect structure or long-term direction.
   - Auto-confirming keeps signup friction low and avoids support tickets for missing codes.
 - Consequences:
   - New lambda under `lambda/cognito_pre_signup/` (container image, handler, README).
-  - Documentation updated (`README.md`, `docs/auth-cognito-pre-signup.md`, `docs/ai/*`).
+  - Documentation updated (`README.md`, `docs/architecture/cognito-option-b.md`, `docs/architecture/security.md`, `docs/ai/*`).
   - Lambda performs no network calls or secret access; it only flips response flags.
 
 ## 2026-01-03 — App-enforced email verification (Chunk 11)
@@ -362,6 +362,18 @@ Record decisions that affect structure or long-term direction.
 
 ---
 
+## 2026-01-05 — Mobile AppShell parity for primary actions
+- Decision: keep the “Search” affordance and global “Create job” CTA in the header on every breakpoint rather than hiding Create inside the mobile drawer.
+- Rationale:
+  - Users on phones/tablets should not have to open the drawer just to create a role or search the board.
+  - Aligning mobile and desktop affordances prevents UX drift as we keep iterating on the shell.
+- Consequences:
+  - The mobile header now renders a search pill plus a compact Create button next to it; the drawer only lists navigation links.
+  - Frontend tests (`BoardDrawer.test.tsx`) cover the drawer’s no-reload status changes to guard against regressions uncovered during this tweak.
+  - Docs updated (`docs/frontend/overview.md`, `docs/ai/*`, API/architecture/frontend overviews) so future contributors know the intended behavior.
+
+---
+
 ## 2026-01-04 — SPA idle timeout handled client-side
 - Decision: Add an inactivity timer to the SPA instead of shortening Cognito refresh-token TTLs.
 - Rationale:
@@ -392,3 +404,13 @@ Record decisions that affect structure or long-term direction.
 - Consequences:
   - Backend route now returns `{items,next_cursor}` and the details bundle includes the first page of activity plus the cursor.
   - Frontend timeline renders inside a fixed-height container, automatically requests the next page when the user nears the bottom, and shows a spinner/“scroll to load more” hint.
+
+## 2026-01-04 — Public demo board + updated marketing copy
+- Decision: Refresh the landing page messaging (remove “private alpha” wording and Jira comparisons) and add a `/demo/board` route that renders a read-only kanban preview without requiring authentication.
+- Rationale:
+  - Prospects requested a quick way to see the board workflow without creating an account.
+  - Referencing competitor brands in the hero copy felt dated, and the “private alpha” badge conflicted with self-serve signup.
+- Consequences:
+  - Landing page CTAs now point to signup or the demo board; hero text references “enterprise-grade clarity” instead of Jira.
+  - Frontend includes `DemoBoardPage.tsx`, which renders seeded cards entirely client-side for unauthenticated visitors.
+  - Documentation highlights the demo route so GTM/support can link to it directly.

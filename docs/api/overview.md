@@ -85,14 +85,19 @@ For flow details, see:
 
 ## Bundled responses
 
-To keep the SPA snappy on high-latency networks, some routes intentionally return multiple resource types at once. The primary example is `GET /jobs/{job_id}/details`, which returns:
+To keep the SPA snappy on high-latency networks, some routes intentionally return multiple resource types at once. Key examples:
+
+- `GET /jobs/{job_id}/details`: returns the job, notes, interviews, and activity slice for the drawer.
+- `GET /jobs/board`: returns an array of statuses plus board cards (with `priority`, `next_action_at`, `last_action_at`, `needs_follow_up` hints) so the Kanban can hydrate in one round trip.
+- `GET /jobs/search`: returns board cards for global search / command palette results.
+- `POST /jobs/`: create a job from anywhere (desktop or mobile). The SPA now surfaces the Create button directly in the header on small screens, but it still calls this same endpoint behind the scenes; no additional mobile-specific API exists.
 
 - `job`: `JobApplicationOut`
 - `notes`: ordered newest → oldest
 - `interviews`: user-scoped interview rows
 - `activity`: timeline entries (default limit 20, clamp 1–200 via `activity_limit`)
 
-The endpoint replaces four sequential requests on the Jobs page, but the underlying single-resource routes remain available for incremental updates (e.g., deleting a note still re-fetches `/jobs/{id}/notes` for truth).
+These endpoints replace several sequential calls, but the underlying single-resource routes remain available for incremental updates (e.g., deleting a note still re-fetches `/jobs/{id}/notes` for truth).
 
 ---
 

@@ -19,6 +19,17 @@ This document describes the frontend structure and conventions at a high level.
 - Presents scan/upload status clearly for user uploads
 - Persists user UI preferences (collapsed cards, etc.) by calling `PATCH /users/me/ui-preferences`
 - Clears Cognito sessions after a configurable period of inactivity; `AuthProvider` listens to user interaction events and logs out idle tabs (default 30 minutes, override via `VITE_IDLE_TIMEOUT_MINUTES`).
+- Hosts the marketing landing page plus `/demo/board`, a read-only board preview rendered entirely client-side so visitors can explore the UI without an account.
+- Keeps the AppShell consistent across breakpoints: the header always exposes global search + the “Create job” CTA, while the mobile drawer is reserved for navigation links. This ensures job creation never hides behind a menu on phones/tablets.
+
+### Board-first workspace (UI revamp snapshot)
+
+- `/board` is the primary route. Query param `jobId` drives the right-side drawer so cards are deep-linkable.
+- `AppShell` provides the slim nav rail on desktop, a mobile drawer for navigation only, global Cmd/Ctrl + K search, and the always-present “Create job” button (including on mobile).
+- `BoardColumn` lanes are grouped (`Applied`, `Interviewing`, `Offer`, `Closed`) and cap height with infinite scroll (25 cards per load) so 100–300 jobs stay performant.
+- `BoardDrawer` loads `GET /jobs/{id}/details` (job + notes + interviews + first page of activity) and drives status changes, momentum buttons, notes, interviews, documents, and timeline pagination without flickering.
+- `CommandMenu` hits `/jobs/search` with debounced queries; selecting a card opens the drawer via `?jobId=`.
+- Smart suggestions + follow-up pills rely on server-computed `needs_follow_up` and momentum fields (`last_action_at`, `next_action_at`, `next_action_title`).
 
 ---
 

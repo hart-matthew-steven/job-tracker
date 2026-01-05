@@ -21,6 +21,8 @@ Keep it concise, factual, and employer-facing.
   - Auto-refresh (controlled by user setting)
   - Defaults: applies account default sort/view on first load; “Use defaults” button to re-apply
 - Profile + Change Password wired to backend APIs.
+- Landing page hero copy no longer references “private alpha” or Jira, and the “View demo board” CTA sends visitors to `/demo/board`, a read-only board preview rendered entirely in the browser so they can experience the kanban UX without signing in.
+- AppShell keeps the search affordance and “Create job” CTA visible in the header even on mobile breakpoints; the drawer is nav-only. This ensures primary actions stay one tap away regardless of screen size.
 - Settings page wired to backend:
   - Auto refresh frequency
   - Jobs default sort/view
@@ -95,6 +97,7 @@ Keep it concise, factual, and employer-facing.
 
 ## Recent Changes (High Signal)
 - Idle-time logout: the frontend now clears Cognito tokens after ~30 minutes of inactivity (configurable via `VITE_IDLE_TIMEOUT_MINUTES`; min 5) to reduce risk from abandoned tabs without changing Cognito’s refresh token policy.
+- Mobile AppShell parity: search + Create now live in the header on every breakpoint, eliminating the need to open the drawer to add roles on phones/tablets. Drawer tests cover the status-change flow to guard against regressions.
 - Jobs page performance: added `GET /jobs/{job_id}/details` to bundle job + notes + interviews + activity, replacing four sequential requests on every selection.
 - Timeline pagination: `/jobs/{job_id}/activity` now returns `{items,next_cursor}`, and the frontend timeline uses an infinite-scroll container to append older entries seamlessly.
 - Chunk 9 (rolled back): Cognito Custom Message Lambda removed; Cognito default emails restored while a new plan is evaluated.

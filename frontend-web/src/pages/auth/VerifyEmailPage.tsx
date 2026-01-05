@@ -6,14 +6,17 @@ import type { FormEvent } from "react";
 import { confirmEmailVerificationCode, sendEmailVerificationCode } from "../../api/authCognito";
 import { useToast } from "../../components/ui/toast";
 import { getSession } from "../../auth/tokenManager";
+import { ROUTES } from "../../routes/paths";
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
 function safeNext(nextRaw: string | null) {
   const v = (nextRaw || "").trim();
-  if (!v) return "/";
-  if (v.startsWith("/") && !v.startsWith("//")) return v;
-  return "/";
+  if (!v || v === "/") return ROUTES.board;
+  if (!/^\//.test(v) || v.startsWith("//")) {
+    return ROUTES.board;
+  }
+  return v;
 }
 
 export default function VerifyEmailPage() {

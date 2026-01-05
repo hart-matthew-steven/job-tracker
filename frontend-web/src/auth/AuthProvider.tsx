@@ -2,6 +2,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { logoutUser, subscribeToUnauthorizedLogout } from "../api";
+import { ROUTES } from "../routes/paths";
 import type { CognitoTokens } from "../types/api";
 import {
     clearSession as clearStoredSession,
@@ -38,9 +39,9 @@ export function useAuth(): AuthContextValue {
 // Prevent open redirects: only allow in-app paths like "/jobs/123"
 function safeNext(nextRaw: string | undefined) {
     const v = (nextRaw || "").trim();
-    if (!v) return "/";
+    if (!v || v === "/") return ROUTES.board;
     if (v.startsWith("/") && !v.startsWith("//")) return v;
-    return "/";
+    return ROUTES.board;
 }
 
 const DEFAULT_IDLE_TIMEOUT_MINUTES = Math.max(

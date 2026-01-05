@@ -35,6 +35,7 @@ type Props = {
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   onLoadMore?: () => void;
+  demoMode?: boolean;
 };
 
 export default function TimelineCard({
@@ -46,12 +47,13 @@ export default function TimelineCard({
   collapsed = false,
   onToggleCollapse,
   onLoadMore,
+  demoMode = false,
 }: Props) {
   const listRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const node = listRef.current;
-    if (!node || !onLoadMore) return;
+    if (!node || !onLoadMore || demoMode) return;
     const handleScroll = () => {
       if (!hasMore || loadingMore) return;
       const { scrollTop, clientHeight, scrollHeight } = node;
@@ -61,7 +63,7 @@ export default function TimelineCard({
     };
     node.addEventListener("scroll", handleScroll);
     return () => node.removeEventListener("scroll", handleScroll);
-  }, [hasMore, loadingMore, onLoadMore]);
+  }, [hasMore, loadingMore, onLoadMore, demoMode]);
 
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
@@ -78,7 +80,7 @@ export default function TimelineCard({
             </div>
           )}
 
-          {loading && <div className="mt-3 text-sm text-slate-400">Loading…</div>}
+          {loading && !demoMode && <div className="mt-3 text-sm text-slate-400">Loading…</div>}
 
           {!loading && !error && (!items || items.length === 0) && (
             <div className="mt-3 text-sm text-slate-400">No activity yet.</div>
