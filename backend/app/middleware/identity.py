@@ -19,6 +19,8 @@ AUTH_BYPASS_PATHS = frozenset(
         "/docs",
         "/openapi.json",
         "/redoc",
+        "/billing/stripe/webhook",
+        "/billing/packs",
     ]
 )
 

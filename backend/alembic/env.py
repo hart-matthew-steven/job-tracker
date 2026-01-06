@@ -17,6 +17,8 @@ from app.models.job_document import JobDocument
 from app.models.job_interview import JobInterview
 from app.models.saved_view import SavedView
 from app.models.user import User
+from app.models.credit import CreditLedger, AIUsage
+from app.models.stripe_event import StripeEvent
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

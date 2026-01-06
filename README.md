@@ -293,6 +293,30 @@ You’ll receive a new `access_token`/`id_token`. The SPA’s `tokenManager` doe
 - Passkeys + native iOS flows (future chunk)
 - AI usage/billing gates (future chunk)
 
+### Stripe prepaid credits (Phase A)
+
+- Credits are sold in fixed packs configured via `STRIPE_PRICE_MAP` (`pack_key:price_id:credits`). The backend accepts only a `pack_key`, resolves the Stripe Price ID + credit quantity, and writes that metadata (`user_id`, `pack_key`, `credits_to_grant`, `environment`) into the Checkout Session and PaymentIntent so clients cannot spoof amounts.
+- Users are linked to Stripe Customers (`users.stripe_customer_id`). `GET /billing/me` returns the current balance, Stripe customer id (if present), and the 10 most recent `credit_ledger` rows (including pack metadata / checkout + payment intent ids).
+- `/billing/stripe/webhook` is the sole minting path. Every event is inserted into `stripe_events` with `status=pending` before any business logic runs; the handler verifies `checkout.session.completed` events are paid, uses the metadata to locate the user + pack, inserts a single ledger entry (`source=stripe`, `source_ref=stripe_event_id`, `pack_key`), and updates `stripe_events.status` to `processed|skipped`. Failures mark the row `failed`, capture the error, and return HTTP 500 so Stripe retries.
+- Local test loop:
+
+```bash
+# 1. Start uvicorn /run backend and forward webhooks locally
+stripe login
+stripe listen --forward-to http://localhost:8000/billing/stripe/webhook
+
+# 2. Create a checkout session for a configured pack (e.g., "starter")
+ACCESS="Bearer $(cat /tmp/access_token)"   # or copy from SPA devtools
+curl -s -X POST http://localhost:8000/billing/stripe/checkout \
+  -H "Authorization: $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{"pack_key":"starter"}'
+# -> open checkout_url, use Stripe test card 4242-4242-4242-4242 (any CVC/ZIP)
+
+# 3. Confirm credits were granted
+curl -s -H "Authorization: $ACCESS" http://localhost:8000/billing/me | jq
+```
+
 ### CI/CD pipelines
 
 Production deploys are now automated through GitHub Actions:

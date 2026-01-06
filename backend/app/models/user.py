@@ -17,6 +17,7 @@ class User(Base):
 
     cognito_sub = Column(String(255), unique=True, index=True, nullable=False)
     auth_provider = Column(String(20), nullable=False, server_default="cognito")
+    stripe_customer_id = Column(String(255), unique=True, nullable=True)
 
     # --- User preferences ---
     # Jobs auto-refresh interval in seconds. 0 = off.

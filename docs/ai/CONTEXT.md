@@ -36,6 +36,7 @@ Primary goals:
 - Database access split between least-privilege runtime (`DB_APP_USER`) and migrations (`DB_MIGRATOR_USER`) credentials.
 - Production hosting: AWS App Runner pulling images from ECR, fronted by `https://api.jobapptracker.dev`; runtime secrets come from AWS Secrets Manager env injects. GitHub Actions (`backend-deploy.yml`) builds/pushes to ECR and drives App Runner updates via `scripts/deploy_apprunner.py`.
 - Job detail hydration is consolidated behind `GET /jobs/{job_id}/details`, which returns `{job, notes, interviews, activity}` in one request so the Jobs page no longer issues four sequential calls on every selection. The legacy per-resource endpoints remain for incremental updates.
+- Billing: `/billing/credits/*` returns balances/ledger slices, `/billing/me` exposes the balance + Stripe customer id, `/billing/packs` surfaces configured packs (`STRIPE_PRICE_MAP=pack_key:price_id:credits`), `/billing/stripe/checkout` accepts only a `pack_key`, and `/billing/stripe/webhook` is the single minting path. `stripe_events` stores every payload with `status`/`error_message`/`processed_at`, and `credit_ledger` rows capture pack metadata + checkout/payment intent ids for future AI usage deductions.
 
 ## AWS / External Services (current)
 - **Email/Verification**: handled by Cognito (and future Cognito-triggered Lambda → Resend). No direct SMTP/SES integration in the FastAPI backend.

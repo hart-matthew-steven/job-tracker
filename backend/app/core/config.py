@@ -1,5 +1,6 @@
 # app/core/config.py
 import os
+from dataclasses import dataclass
 from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
@@ -26,6 +27,13 @@ def merge_unique(items: list[str]) -> list[str]:
         seen.add(v)
         out.append(v)
     return out
+
+
+@dataclass(frozen=True)
+class StripeCreditPack:
+    key: str
+    price_id: str
+    credits: int
 
 
 class Settings:
@@ -116,6 +124,15 @@ class Settings:
         self.S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "")
         self.S3_PREFIX = os.getenv("S3_PREFIX", "")
 
+        # ----------------------------
+        # Stripe billing
+        # ----------------------------
+        self.STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
+        self.STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
+        self.STRIPE_DEFAULT_CURRENCY = (os.getenv("STRIPE_DEFAULT_CURRENCY", "usd").strip().lower() or "usd")
+        stripe_price_map_raw = os.getenv("STRIPE_PRICE_MAP", "")
+        self.STRIPE_PRICE_MAP = self._parse_stripe_price_map(stripe_price_map_raw)
+
         # Final: fail fast in prod
         self._validate_prod()
 
@@ -134,6 +151,12 @@ class Settings:
             missing.append("DB_APP_USER")
         if not self.DB_APP_PASSWORD:
             missing.append("DB_APP_PASSWORD")
+        if not self.STRIPE_SECRET_KEY:
+            missing.append("STRIPE_SECRET_KEY")
+        if not self.STRIPE_WEBHOOK_SECRET:
+            missing.append("STRIPE_WEBHOOK_SECRET")
+        if not self.STRIPE_PRICE_MAP:
+            missing.append("STRIPE_PRICE_MAP")
         if not self.TURNSTILE_SITE_KEY:
             missing.append("TURNSTILE_SITE_KEY")
         if not self.TURNSTILE_SECRET_KEY:
@@ -201,6 +224,37 @@ class Settings:
     @property
     def migrations_database_url(self) -> str:
         return self._build_database_url(self.DB_MIGRATOR_USER, self.DB_MIGRATOR_PASSWORD)
+
+    def _parse_stripe_price_map(self, raw: str) -> dict[str, StripeCreditPack]:
+        """
+        Parse STRIPE_PRICE_MAP entries formatted as
+        pack_key:price_id:credits,pack_key2:price_id2:credits2
+        """
+        packs: dict[str, StripeCreditPack] = {}
+        if not raw:
+            return packs
+        for entry in raw.split(","):
+            token = entry.strip()
+            if not token:
+                continue
+            parts = [p.strip() for p in token.split(":")]
+            if len(parts) != 3:
+                continue
+            pack_key, price_id, credits_raw = parts
+            if not pack_key or not price_id:
+                continue
+            try:
+                credits = int(credits_raw)
+            except ValueError:
+                continue
+            if credits <= 0:
+                continue
+            packs[pack_key] = StripeCreditPack(key=pack_key, price_id=price_id, credits=credits)
+        return packs
+
+    def get_stripe_pack(self, pack_key: str) -> StripeCreditPack | None:
+        """Lookup a configured Stripe credit pack."""
+        return self.STRIPE_PRICE_MAP.get((pack_key or "").strip())
 
 
 settings = Settings()

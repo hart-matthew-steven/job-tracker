@@ -414,3 +414,16 @@ Record decisions that affect structure or long-term direction.
   - Landing page CTAs now point to signup or the demo board; hero text references “enterprise-grade clarity” instead of Jira.
   - Frontend includes `DemoBoardPage.tsx`, which renders seeded cards entirely client-side for unauthenticated visitors.
   - Documentation highlights the demo route so GTM/support can link to it directly.
+
+---
+
+## 2026-01-05 — Stripe prepaid credits hardening
+- Decision: Gate checkout by `pack_key`, store `stripe_events` with `status`/`error` for idempotency, and mint credits exclusively from the webhook.
+- Rationale:
+  - Clients should not choose arbitrary Stripe prices or credit amounts; configuration lives in `STRIPE_PRICE_MAP` so ops can tweak packs without redeploying.
+  - Stripe webhooks can be retried, delivered out of order, or partially fail. Persisting every payload plus status/error text gives observability and lets us safely short-circuit duplicates.
+  - Minting credits inside the webhook transaction (with `(user_id, source_ref)` uniqueness) keeps the DB as the source of truth as we layer on future AI usage debits.
+- Consequences:
+  - `/billing/stripe/checkout` now accepts `{pack_key}` and returns the pack/credits, `/billing/packs` lists configured packs, and `/billing/me` exposes balances + ledger snippets for the SPA.
+  - `credit_ledger` stores `pack_key`, `stripe_checkout_session_id`, and `stripe_payment_intent_id` so reconciliations/debugging are trivial.
+  - `stripe_events` gained `status`, `error_message`, and `processed_at`. The handler inserts a pending row, processes the event, and updates status to `processed|skipped`. Failures mark the row `failed` and return HTTP 500 so Stripe retries.

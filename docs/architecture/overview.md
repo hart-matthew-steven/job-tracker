@@ -36,6 +36,16 @@ Non-goals:
 - Integrates with AWS services for storage and background processing
 - Coordinates file upload validation and anti-malware scanning
 
+### Billing & AI Credits (Phase A)
+- The backend now persists prepaid “AI Credits” in two tables: `credit_ledger` (balances) and `ai_usage` (future cost tracking). The DB remains the source of truth; nothing relies on Stripe or OpenAI yet.
+- Credit balances are stored as integer cents. Doing all math in integers prevents float rounding drift and keeps idempotent reconciliations predictable when real money is involved.
+- Every ledger row records `source` (`stripe`, `admin`, `promo`, `usage`, etc.) plus an optional `source_ref`. The `(user_id, source_ref)` pair is unique so future Stripe webhooks and admin tooling can retry safely without double-crediting.
+- The upcoming AI usage features will populate `ai_usage.request_id` the same way for idempotency once OpenAI calls land. For now these tables are “write-once/read-later” foundations so accounting is ready when integrations ship.
+- Stripe Checkout is the only way to purchase credits. Users are linked to Stripe customers (`users.stripe_customer_id`), and every purchase references a configured pack (`STRIPE_PRICE_MAP=pack:price_id:credits`). The backend accepts only a `pack_key`, resolves the Stripe price + credit quantity, and writes that metadata into the Checkout session so the webhook can’t be spoofed.
+- Every webhook payload is written to `stripe_events` before any balance mutation. We now track `status` (`pending`, `processed`, `skipped`, `failed`), the raw payload, and error text for observability/idempotency. A rerun that hits the `stripe_event_id` unique constraint simply returns `200 OK` without touching balances.
+- Credits are minted exclusively by signed `checkout.session.completed` events where `payment_status=paid`. The webhook handler runs inside a transaction: insert `stripe_events` → mint `credit_ledger` entry (with `pack_key`, checkout/payment intent ids) → mark status `processed` and commit. Any exception sets `status=failed`, stores the error, and returns HTTP 500 so Stripe retries instead of leaving partial state.
+- Stripe payment flows and OpenAI cost metering intentionally remain out of scope for Phase A—they will plug into this ledger/service layer later without reworking auth or migrations. When OpenAI usage ships, it will deduct from `credit_ledger` and write mirrored facts to `ai_usage`.
+
 ### AWS (Production Infrastructure)
 The project assumes AWS-managed services are used for:
 - Storage (e.g., uploads, generated artifacts)

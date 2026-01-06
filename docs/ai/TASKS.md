@@ -89,3 +89,4 @@
 - Refactor frontend: split `frontend-web/src/App.tsx` (extract pages/components/hooks), add `src/routes/paths.ts`, and group job components under `src/components/jobs/`.
 - Consolidate backend user/settings responses (use dedicated settings schema for `/users/me/settings`)
 - Phase 2: dev reset script implemented: `temp_scripts/reset_dev_db.py` (guardrails, S3 cleanup, logs, `--yes`)
+- Stripe prepaid credits foundation hardened: `STRIPE_PRICE_MAP` pack config, `/billing/me` + `/billing/packs`, transactional webhook that updates `stripe_events` status + `credit_ledger` pack metadata. AI usage charging still to come (future chunk).

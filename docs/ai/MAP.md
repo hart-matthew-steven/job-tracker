@@ -48,6 +48,11 @@ Update it whenever key entry points or folder structure changes.
 - Backend tests: `backend/tests/` (pytest)
 - Backend env var reference: `backend/.env.example` (generated, names only)
 - User preferences API: `backend/app/routes/users.py` (`/users/me`, `/users/me/settings`, `/users/me/ui-preferences`)
+- Billing:
+  - Config: `STRIPE_PRICE_MAP` parsing + helpers live in `backend/app/core/config.py` (`StripeCreditPack`, `settings.get_stripe_pack()`).
+  - Routes: `/billing/*` in `backend/app/routes/billing.py` (balances/ledger/me/packs) and `/billing/stripe/*` in `backend/app/routes/stripe_billing.py` (checkout + webhook).
+  - Service: `backend/app/services/stripe.py` (customer linking, pack/key checkout sessions, transactional webhook processing writing to `stripe_events` + `credit_ledger`).
+  - Models: `backend/app/models/credit.py` (`credit_ledger`, `ai_usage`) and `backend/app/models/stripe_event.py` (`status`, `error_message`, `processed_at`).
 - Deployment: README "Production deployment (AWS App Runner)" section documents the ECR/App Runner flow (buildx `linux/amd64`, Secrets Manager env injection, `api.jobapptracker.dev` endpoint).
 
 ## Architecture Docs

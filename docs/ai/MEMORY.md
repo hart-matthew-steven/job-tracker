@@ -59,6 +59,11 @@ Keep it concise, factual, and employer-facing.
 - Documents:
   - Presigned S3 upload flow implemented (presign → upload to S3 → confirm). GuardDuty Malware Protection + Lambda forwarder update `scan_status` before downloads are allowed. The Lambda now reads `DOC_SCAN_SHARED_SECRET` from AWS Secrets Manager via `DOC_SCAN_SHARED_SECRET_ARN` (not plain env text) before calling `/jobs/{job_id}/documents/{document_id}/scan-result`.
 - Debug endpoints `/auth/debug/token-info` + `/auth/debug/identity` remain dev-only. Authorization across the app depends on Cognito access tokens + DB ownership checks; there is no custom JWT mode anymore.
+- Billing:
+  - `credit_ledger` (integer cents) + `stripe_events` (raw payload, `status`, `processed_at`, `error`) are the source of truth for prepaid credits.
+  - `STRIPE_PRICE_MAP` configures credit packs (`pack_key:price_id:credits`). `/billing/stripe/checkout` only accepts a `pack_key` and stamps metadata (`user_id`, `pack_key`, `credits_to_grant`, `environment`) into the Checkout Session so the webhook can mint credits deterministically.
+  - `/billing/stripe/webhook` validates the signature, inserts `stripe_events` (`status=pending`), runs the handler transactionally, writes to `credit_ledger` with pack/session metadata, and updates status to `processed|skipped|failed`. Failures capture the error and return HTTP 500 so Stripe retries.
+  - `/billing/me` exposes the balance + Stripe customer id + the latest ledger entries; `/billing/packs` surfaces the configured packs for the frontend.
 
 ## What Is Working
 - Cognito signup → confirm → login → MFA setup/verify → authenticated app access.
@@ -70,6 +75,7 @@ Keep it concise, factual, and employer-facing.
 - Tags end-to-end (stored on jobs; filterable in UI; persisted in saved views).
 - Job activity timeline (notes/documents/status updates).
 - Job interviews CRUD in UI + backend.
+- Stripe prepaid credits: pack-based Checkout, webhook-driven credit grants, `/billing/me`/`/billing/credits/*` APIs, and webhook idempotency backed by `stripe_events`.
 
 ## Partially Implemented / Deferred
 - Offer tracking (explicitly deferred / skipped for now).
@@ -96,6 +102,11 @@ Keep it concise, factual, and employer-facing.
 - Tailwind v4 note: `dark:` is configured to follow the `.dark` class via `@custom-variant` in `frontend-web/src/index.css` (not media-based).
 
 ## Recent Changes (High Signal)
+- Stripe billing hardening:
+  - Added `stripe_customer_id` linkage, `STRIPE_PRICE_MAP` parser, `/billing/packs`, and `/billing/me`.
+  - Checkout now accepts only `pack_key`; metadata instructs the webhook how many credits to mint.
+  - Webhooks use transactional inserts into `stripe_events` (with status/error fields) plus ledger entries that capture pack key + Stripe ids; duplicates short-circuit, failures mark the row and return HTTP 500 for retries.
+  - Tests cover checkout metadata, webhook idempotency/failure, new billing APIs, and pack listing.
 - Idle-time logout: the frontend now clears Cognito tokens after ~30 minutes of inactivity (configurable via `VITE_IDLE_TIMEOUT_MINUTES`; min 5) to reduce risk from abandoned tabs without changing Cognito’s refresh token policy.
 - Mobile AppShell parity: search + Create now live in the header on every breakpoint, eliminating the need to open the drawer to add roles on phones/tablets. Drawer tests cover the status-change flow to guard against regressions.
 - Jobs page performance: added `GET /jobs/{job_id}/details` to bundle job + notes + interviews + activity, replacing four sequential requests on every selection.

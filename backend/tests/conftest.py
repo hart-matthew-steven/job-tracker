@@ -9,6 +9,7 @@ import importlib
 
 from app.core.base import Base
 from app.core import config as app_config
+from app.core.config import StripeCreditPack
 
 # Import models so they register with SQLAlchemy metadata.
 from app.models.user import User  # noqa: F401
@@ -20,6 +21,8 @@ from app.models.job_activity import JobActivity  # noqa: F401
 from app.models.job_interview import JobInterview  # noqa: F401
 from app.models.saved_view import SavedView  # noqa: F401
 from app.models.email_verification_code import EmailVerificationCode  # noqa: F401
+from app.models.credit import CreditLedger, AIUsage  # noqa: F401
+from app.models.stripe_event import StripeEvent  # noqa: F401
 
 from app.core.database import get_db
 
@@ -94,6 +97,10 @@ def _reset_mutable_settings():
         "RESEND_API_KEY",
         "RESEND_FROM_EMAIL",
         "FRONTEND_BASE_URL",
+        "STRIPE_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "STRIPE_DEFAULT_CURRENCY",
+        "STRIPE_PRICE_MAP",
     ]
     original = {k: getattr(app_config.settings, k) for k in keys}
     try:
@@ -168,6 +175,20 @@ def app(db_session, monkeypatch):
 
     yield fastapi_app
     fastapi_app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def stripe_packs(monkeypatch):
+    packs = {
+        "starter": StripeCreditPack(key="starter", price_id="price_test_starter", credits=500),
+        "pro": StripeCreditPack(key="pro", price_id="price_test_pro", credits=1200),
+    }
+    original = app_config.settings.STRIPE_PRICE_MAP
+    app_config.settings.STRIPE_PRICE_MAP = packs
+    try:
+        yield packs
+    finally:
+        app_config.settings.STRIPE_PRICE_MAP = original
 
 
 @pytest.fixture()

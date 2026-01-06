@@ -94,6 +94,41 @@ Guidelines:
 
 ---
 
+## Billing / Credits
+
+- `GET /billing/credits/balance`
+  - Auth: Bearer
+  - Response: `{ "currency": "usd", "balance_cents": 5500, "balance_dollars": "55.00" }`
+  - Notes: Uses integer cents from the credit ledger. The string dollars field is presentation-only for the UI.
+
+- `GET /billing/credits/ledger?limit=50&offset=0`
+  - Auth: Bearer
+  - Response: `[{ "amount_cents": 2000, "source": "promo", "description": "...", "source_ref": "promo-jan", "created_at": "..." }, ... ]`
+  - Notes: Entries are returned newest-first and leverage `(user_id, source_ref)` idempotency; Stripe/OpenAI integrations will add to this feed later.
+
+- `GET /billing/me`
+  - Auth: Bearer
+  - Response: `{ "balance_cents": 5500, "stripe_customer_id": "cus_123", "ledger": [ ... ] }`
+  - Notes: Returns a lightweight overview combining the current balance, linked Stripe customer id (if any), and the 10 most recent ledger entries including pack metadata.
+
+- `GET /billing/packs`
+  - Auth: none (public)
+  - Response: `[{ "key": "starter", "credits": 500, "price_id": "price_123", "display_price_dollars": "5.00" }, ...]`
+  - Notes: Packs are derived from `STRIPE_PRICE_MAP` (format: `pack_key:price_id:credits`). The frontend only sends the `pack_key`; the backend resolves price/credits.
+
+- `POST /billing/stripe/checkout`
+  - Auth: Bearer
+  - Body: `{ "pack_key": "starter" }`
+  - Response: `{ "checkout_session_id": "cs_test_123", "checkout_url": "https://checkout.stripe.com/...", "currency": "usd", "pack_key": "starter", "credits_granted": 500 }`
+  - Notes: Pack information (Stripe price id + credits) is resolved server-side from `STRIPE_PRICE_MAP`. Checkout metadata includes `user_id`, `pack_key`, `credits_to_grant`, and `environment` so the webhook can mint credits deterministically. No balance changes occur until the webhook confirms a paid session.
+
+- `POST /billing/stripe/webhook`
+  - Auth: Stripe signature header (`Stripe-Signature`)
+  - Body: Raw Stripe event JSON
+  - Notes: Validates the signature, inserts/locks a `stripe_events` row, and uses metadata (`user_id`, `pack_key`, `credits_to_grant`) on `checkout.session.completed` events to mint a single ledger entry. Duplicate events short-circuit once the `stripe_event_id` is recorded. Failures mark `stripe_events.status=failed` and return HTTP 500 so Stripe retries.
+
+---
+
 ## Jobs
 
 - `GET /jobs`

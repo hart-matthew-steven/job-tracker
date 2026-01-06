@@ -18,6 +18,8 @@ from app.routes.saved_views import router as saved_views_router
 from app.routes.activity import router as activity_router
 from app.routes.interviews import router as interviews_router
 from app.routes.internal_documents import router as internal_documents_router
+from app.routes.stripe_billing import router as stripe_billing_router
+from app.routes.billing import router as billing_router
 
 
 # -------------------------------------------------------------------
@@ -145,6 +147,8 @@ app.include_router(saved_views_router)
 app.include_router(activity_router)
 app.include_router(interviews_router)
 app.include_router(internal_documents_router)
+app.include_router(stripe_billing_router)
+app.include_router(billing_router)
 
 
 # -------------------------------------------------------------------

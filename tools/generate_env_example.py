@@ -51,6 +51,7 @@ ALLOWED_PREFIXES = (
     "GUARD_",
     "TURNSTILE_",
     "FRONTEND_",
+    "STRIPE_",
 )
 
 ALLOWED_EXACT = {"ENV"}
@@ -106,6 +107,16 @@ GROUPS: list[Group] = [
             "RESEND_API_KEY",
             "RESEND_FROM_EMAIL",
             "FRONTEND_BASE_URL",
+        ),
+    ),
+    Group(
+        "Stripe",
+        "Stripe billing + webhook secrets.",
+        (
+            "STRIPE_SECRET_KEY",
+            "STRIPE_WEBHOOK_SECRET",
+            "STRIPE_DEFAULT_CURRENCY",
+            "STRIPE_PRICE_MAP",
         ),
     ),
 ]
