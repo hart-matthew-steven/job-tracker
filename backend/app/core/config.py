@@ -134,6 +134,14 @@ class Settings:
         self.STRIPE_PRICE_MAP = self._parse_stripe_price_map(stripe_price_map_raw)
         self.ENABLE_BILLING_DEBUG_ENDPOINT = str_to_bool(os.getenv("ENABLE_BILLING_DEBUG_ENDPOINT", "false"))
 
+        # ----------------------------
+        # OpenAI / AI usage
+        # ----------------------------
+        self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+        self.OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip() or "gpt-4.1-mini"
+        self.AI_CREDITS_RESERVE_BUFFER_PCT = max(0, int(os.getenv("AI_CREDITS_RESERVE_BUFFER_PCT", "25")))
+        self.AI_COMPLETION_TOKENS_MAX = max(1, int(os.getenv("AI_COMPLETION_TOKENS_MAX", "800")))
+
         # Final: fail fast in prod
         self._validate_prod()
 
@@ -158,6 +166,8 @@ class Settings:
             missing.append("STRIPE_WEBHOOK_SECRET")
         if not self.STRIPE_PRICE_MAP:
             missing.append("STRIPE_PRICE_MAP")
+        if not self.OPENAI_API_KEY:
+            missing.append("OPENAI_API_KEY")
         if not self.TURNSTILE_SITE_KEY:
             missing.append("TURNSTILE_SITE_KEY")
         if not self.TURNSTILE_SECRET_KEY:

@@ -135,6 +135,25 @@ Guidelines:
 
 ---
 
+## AI usage
+
+- `POST /ai/chat`
+  - Auth: Bearer
+  - Body:
+    ```json
+    {
+      "request_id": "chat-123",
+      "messages": [
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "Draft a follow-up email."}
+      ]
+    }
+    ```
+  - Response: `{ "request_id": "chat-123", "model": "gpt-4.1-mini", "response_text": "...", "prompt_tokens": 900, "completion_tokens": 350, "credits_used_cents": 240, "credits_refunded_cents": 60, "credits_reserved_cents": 300, "credits_remaining_cents": 4700, "credits_remaining_dollars": "47.00" }`
+  - Notes: The backend tokenizes prompts with OpenAI’s tokenizer (`tiktoken`), budgets `AI_COMPLETION_TOKENS_MAX` completion tokens, applies `AI_CREDITS_RESERVE_BUFFER_PCT` (currently 25%), reserves *more* credits than needed, calls OpenAI, then finalizes the reservation with the actual cost. If the OpenAI response exceeds the reservation the entire reservation is refunded and the API returns HTTP 500 so the client can retry with a fresh request id. Passing the same `request_id` makes the call idempotent—success responses are replayed without hitting OpenAI again.
+
+---
+
 ## AI demo / reservation stub
 
 - `POST /ai/demo`

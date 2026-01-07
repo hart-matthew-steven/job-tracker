@@ -21,6 +21,7 @@ from app.routes.internal_documents import router as internal_documents_router
 from app.routes.stripe_billing import router as stripe_billing_router
 from app.routes.billing import router as billing_router
 from app.routes.ai_demo import router as ai_demo_router
+from app.routes.ai_chat import router as ai_chat_router
 
 
 # -------------------------------------------------------------------
@@ -151,6 +152,7 @@ app.include_router(internal_documents_router)
 app.include_router(stripe_billing_router)
 app.include_router(billing_router)
 app.include_router(ai_demo_router)
+app.include_router(ai_chat_router)
 
 
 # -------------------------------------------------------------------

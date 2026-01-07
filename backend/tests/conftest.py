@@ -102,6 +102,9 @@ def _reset_mutable_settings():
         "STRIPE_DEFAULT_CURRENCY",
         "STRIPE_PRICE_MAP",
         "ENABLE_BILLING_DEBUG_ENDPOINT",
+        "OPENAI_API_KEY",
+        "OPENAI_MODEL",
+        "AI_CREDITS_RESERVE_BUFFER_PCT",
     ]
     original = {k: getattr(app_config.settings, k) for k in keys}
     try:
@@ -124,6 +127,10 @@ def app(db_session, monkeypatch):
     app_config.settings.RESEND_API_KEY = app_config.settings.RESEND_API_KEY or "test-resend-key"
     app_config.settings.RESEND_FROM_EMAIL = app_config.settings.RESEND_FROM_EMAIL or "Job Tracker <noreply@example.test>"
     app_config.settings.FRONTEND_BASE_URL = app_config.settings.FRONTEND_BASE_URL or "http://localhost:5173"
+    app_config.settings.OPENAI_API_KEY = app_config.settings.OPENAI_API_KEY or "test-openai-key"
+    app_config.settings.OPENAI_MODEL = app_config.settings.OPENAI_MODEL or "gpt-4.1-mini"
+    if not app_config.settings.AI_CREDITS_RESERVE_BUFFER_PCT:
+        app_config.settings.AI_CREDITS_RESERVE_BUFFER_PCT = 25
 
     # SlowAPI decorators bind at import time, so reload routes with latest settings.
     import app.routes.documents as documents_routes

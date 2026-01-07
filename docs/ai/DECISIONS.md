@@ -453,3 +453,16 @@ Record decisions that affect structure or long-term direction.
   - `/billing/stripe/checkout` now accepts `{pack_key}` and returns the pack/credits, `/billing/packs` lists configured packs, and `/billing/me` exposes balances + ledger snippets for the SPA.
   - `credit_ledger` stores `pack_key`, `stripe_checkout_session_id`, and `stripe_payment_intent_id` so reconciliations/debugging are trivial.
   - `stripe_events` gained `status`, `error_message`, and `processed_at`. The handler inserts a pending row, processes the event, and updates status to `processed|skipped`. Failures mark the row `failed` and return HTTP 500 so Stripe retries.
+
+---
+
+## 2026-01-07 — OpenAI usage integration
+- Decision: ship `/ai/chat` backed by a dedicated OpenAI client + AI usage orchestrator that estimates tokens, over-reserves credits with a configurable buffer, performs the OpenAI call, and settles/refunds atomically.
+- Rationale:
+  - Prepaid credits must remain the single source of truth. Reserving before calling OpenAI and finalizing afterward prevents negative balances and gives an auditable trail (`ai_reserve` → `ai_release` → `ai_charge` / `ai_refund`).
+  - Over-reserving with `AI_CREDITS_RESERVE_BUFFER_PCT` fails safely—if OpenAI usage exceeds the buffer the entire hold is refunded and the client retries instead of silently eating the delta.
+  - Idempotent request ids keep OpenAI costs predictable: retries reuse the existing ledger rows and cached response instead of generating duplicate completions.
+- Consequences:
+  - `.env.example` now documents `OPENAI_API_KEY`, `OPENAI_MODEL`, and `AI_CREDITS_RESERVE_BUFFER_PCT`; `app/core/config.py` loads them and `_validate_prod` requires the API key.
+  - New services: `app/services/openai_client.py` (SDK wrapper) and `app/services/ai_usage.py` (tokenization via `tiktoken`, estimation, reservation, settlement, `ai_usage` persistence).
+  - New route: `POST /ai/chat` (with request_id + messages). It responds with the completion text, usage stats, credits charged/refunded, and the remaining balance; HTTP 402/500/502 cover insufficiency, reservation overruns, and upstream failures respectively.

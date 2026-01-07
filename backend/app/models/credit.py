@@ -56,6 +56,11 @@ class AIUsage(Base):
     total_tokens = Column(Integer, nullable=False, server_default="0", default=0)
     cost_cents = Column(Integer, nullable=False)
     request_id = Column(String(255), nullable=True)
+    reserved_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    actual_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    status = Column(String(20), nullable=False, server_default="pending")
+    response_text = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
     user = relationship("User", backref="ai_usage_entries")

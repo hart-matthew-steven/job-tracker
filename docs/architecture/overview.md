@@ -36,19 +36,18 @@ Non-goals:
 - Integrates with AWS services for storage and background processing
 - Coordinates file upload validation and anti-malware scanning
 
-### Billing & AI Credits (Phase A)
-- The backend now persists prepaid “AI Credits” in two tables: `credit_ledger` (balances) and `ai_usage` (future cost tracking). The DB remains the source of truth; nothing relies on Stripe or OpenAI yet.
-- Credit balances are stored as integer cents. Doing all math in integers prevents float rounding drift and keeps idempotent reconciliations predictable when real money is involved.
-- Every ledger row records `source` (`stripe`, `admin`, `promo`, `usage`, etc.) plus an optional `source_ref`. The `(user_id, source_ref)` pair is unique so future Stripe webhooks and admin tooling can retry safely without double-crediting.
-- The upcoming AI usage features will populate `ai_usage.request_id` the same way for idempotency once OpenAI calls land. For now these tables are “write-once/read-later” foundations so accounting is ready when integrations ship.
+### Billing & AI Credits (Stripe + OpenAI)
+- The backend keeps prepaid “AI Credits” in two tables: `credit_ledger` (balances) and `ai_usage` (per-request audit trail). The DB is the source of truth; Stripe merely funds balances and OpenAI never bills us directly.
+- Credit balances are stored as integer cents (1 USD = 100 credits). Doing all math in integers prevents float rounding drift and keeps idempotent reconciliations predictable when real money is involved.
+- Every ledger row records `source` (`stripe`, `admin`, `promo`, `usage`, etc.) plus an optional `source_ref`. `(user_id, source_ref)` and `(user_id, idempotency_key)` are unique so Stripe webhooks, admin tooling, and AI usage can retry safely without double-crediting.
 - Stripe Checkout is the only way to purchase credits. Users are linked to Stripe customers (`users.stripe_customer_id`), and every purchase references a configured pack (`STRIPE_PRICE_MAP=pack:price_id:credits`). The backend accepts only a `pack_key`, resolves the Stripe price + credit quantity, and writes that metadata into the Checkout session so the webhook can’t be spoofed.
 - Every webhook payload is written to `stripe_events` before any balance mutation. We track `status` (`pending`, `processed`, `skipped`, `failed`), the raw payload, and error text for observability/idempotency. A rerun that hits the `stripe_event_id` unique constraint simply returns `200 OK` without touching balances.
 - Credits are minted exclusively by signed `checkout.session.completed` events where `payment_status=paid`. The handler runs inside a transaction: insert `stripe_events` → mint `credit_ledger` entry (with `pack_key`, checkout/payment intent ids, per-user `idempotency_key`) → mark status `processed|skipped`. Any exception sets `status=failed`, stores the error, and returns HTTP 500 so Stripe retries.
 - Spending/reservations:
   - `reserve_credits(...)` inserts `entry_type=ai_reserve` rows (status `reserved`, correlation id) after locking the user row. This immediately reduces the available balance so overlapping AI requests cannot double spend.
   - `finalize_charge(...)` first releases the hold (`ai_release`) then posts the actual cost (`ai_charge`). `refund_reservation(...)` instead writes `ai_refund` and marks the hold refunded. Every step has its own `idempotency_key`, so retries simply read the existing ledger entries.
-  - If the balance would go negative we raise HTTP 402 and never touch the ledger, which is the behavior future AI routes will expose to clients.
-- Stripe payment flows and OpenAI cost metering intentionally remain out of scope for Phase A—they will plug into this ledger/service layer later without reworking auth or migrations. When OpenAI usage ships, it will deduct from `credit_ledger` and write mirrored facts to `ai_usage`.
+  - If the balance would go negative we raise HTTP 402 and never touch the ledger. `/ai/chat` tokenizes prompts with `tiktoken`, budgets `AI_COMPLETION_TOKENS_MAX` completion tokens, applies the buffer (`AI_CREDITS_RESERVE_BUFFER_PCT`), and only then calls OpenAI, so paid work never starts unless funds are available.
+- The OpenAI orchestration layer estimates token usage, over-reserves with `AI_CREDITS_RESERVE_BUFFER_PCT`, calls `OpenAIClient`, then settles the reservation with the actual amount. If OpenAI returns more tokens than the reservation the entire hold is refunded, the response is discarded, and HTTP 500 is returned so the client can retry.
 
 ### AWS (Production Infrastructure)
 The project assumes AWS-managed services are used for:

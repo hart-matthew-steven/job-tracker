@@ -304,7 +304,8 @@ You’ll receive a new `access_token`/`id_token`. The SPA’s `tokenManager` doe
      - `finalize_charge(reservation_id, actual_amount, idempotency_key)` → writes `ai_release` (+reserved amount) followed by `ai_charge` (−actual cost) so the ledger nets to the true spend; or
      - `refund_reservation(reservation_id, idempotency_key)` → writes `ai_refund` (+reserved) and marks the hold as refunded.
   Each call supplies a unique idempotency key, so retried requests reuse the existing rows instead of double spending.
-- `POST /ai/demo` uses those primitives today so engineers can simulate “AI usage” locally: it reserves credits, optionally finalizes with a different actual cost, or refunds if `simulate_outcome=fail`. This endpoint is dev-only documentation for how real AI routes should behave; the future OpenAI integration will call the same service methods before talking to OpenAI.
+- `POST /ai/chat` applies the same primitives in production: we run the payload through OpenAI’s tokenizer (`tiktoken`) to count prompt tokens, budget `AI_COMPLETION_TOKENS_MAX` completion tokens, add the configured buffer (`AI_CREDITS_RESERVE_BUFFER_PCT`, default 25%), reserve that total, call OpenAI, then finalize/refund based on actual usage. If OpenAI returns more tokens than were reserved the hold is refunded automatically and the API responds with HTTP 500 so the client can retry safely (no silent overruns).
+- `POST /ai/demo` remains available for engineers when `ENABLE_BILLING_DEBUG_ENDPOINT=true` to exercise the reserve/finalize/refund flow without calling OpenAI.
 - Local test loop:
 
 ```bash
@@ -334,6 +335,18 @@ curl -s -X POST http://localhost:8000/ai/demo \
   -H "Authorization: $ACCESS" \
   -H "Content-Type: application/json" \
   -d '{"idempotency_key":"demo-123","estimated_cost_credits":1200,"simulate_outcome":"success","actual_cost_credits":900}'
+
+# 6. Call the production AI chat endpoint (over-reserves + settles automatically)
+curl -s -X POST http://localhost:8000/ai/chat \
+  -H "Authorization: $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "request_id": "chat-1",
+        "messages": [
+          {"role": "system", "content": "You are a concise assistant."},
+          {"role": "user", "content": "Summarize my weekly wins."}
+        ]
+      }'
 ```
 
 ### CI/CD pipelines

@@ -97,3 +97,7 @@
   - Added `entry_type/status/correlation_id` columns so we can post `ai_reserve`, `ai_release`, `ai_charge`, and `ai_refund` rows.
   - `reserve_credits`, `finalize_charge`, and `refund_reservation` wrap the ledger writes with per-step idempotency keys plus DB-level locking.
   - `/ai/demo` exercises the full reserve/finalize/refund flow until OpenAI endpoints use the same helper.
+- OpenAI usage integration:
+  - `.env.example` now includes `OPENAI_API_KEY`, `OPENAI_MODEL`, `AI_CREDITS_RESERVE_BUFFER_PCT`, `AI_COMPLETION_TOKENS_MAX`.
+  - `app/services/openai_client.py` wraps the SDK, while `app/services/ai_usage.py` handles tokenization via `tiktoken`, buffered reservations, settlement/refund, and idempotent replays backed by `ai_usage`.
+  - `/ai/chat` enforces prepaid credits (tokenize → reserve → OpenAI → finalize/refund), returns usage stats + remaining balance, and surfaces HTTP 500/502 on overruns/provider failures. Tests cover reservation math, settlement scenarios, idempotency, and the new API.

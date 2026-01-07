@@ -118,6 +118,10 @@ GROUPS: list[Group] = [
             "STRIPE_DEFAULT_CURRENCY",
             "STRIPE_PRICE_MAP",
             "ENABLE_BILLING_DEBUG_ENDPOINT",
+            "OPENAI_API_KEY",
+            "OPENAI_MODEL",
+            "AI_CREDITS_RESERVE_BUFFER_PCT",
+            "AI_COMPLETION_TOKENS_MAX",
         ),
     ),
 ]

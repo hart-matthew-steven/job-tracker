@@ -269,8 +269,8 @@ class CreditsService:
         actual_amount_cents: int | None,
         idempotency_key: str,
     ) -> LedgerOperationResult:
-        if actual_amount_cents is not None and actual_amount_cents <= 0:
-            raise ValueError("actual_amount_cents must be positive")
+        if actual_amount_cents is not None and actual_amount_cents < 0:
+            raise ValueError("actual_amount_cents cannot be negative")
 
         reservation = (
             self.db.query(CreditLedger)
