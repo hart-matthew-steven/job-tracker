@@ -1,19 +1,33 @@
 from __future__ import annotations
 
+from __future__ import annotations
+
+from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 
-from sqlalchemy import func
+from fastapi import HTTPException, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.credit import CreditLedger
+from app.models.user import User
+
+
+class InsufficientCreditsError(Exception):
+    pass
+
+
+@dataclass
+class BalanceSummary:
+    balance_cents: int
+    total_granted_cents: int
+    total_spent_cents: int
 
 
 class CreditsService:
     """
-    Lightweight CRUD helpers around the credit ledger.
-
-    The service keeps all arithmetic in integer cents and defers presentation
-    formatting to the caller.
+    Helpers around the credit ledger. All arithmetic stays in integer cents and
+    the ledger remains the source of truth for both grants and spends.
     """
 
     MAX_PAGE_SIZE = 200
@@ -22,16 +36,28 @@ class CreditsService:
         self.db = db
 
     def get_balance_cents(self, user_id: int) -> int:
-        """Return the user's current credit balance in integer cents."""
-        total = (
+        summary = self.get_balance_summary(user_id)
+        return summary.balance_cents
+
+    def get_balance_summary(self, user_id: int) -> BalanceSummary:
+        granted = (
             self.db.query(func.coalesce(func.sum(CreditLedger.amount_cents), 0))
-            .filter(CreditLedger.user_id == user_id)
+            .filter(CreditLedger.user_id == user_id, CreditLedger.amount_cents > 0)
             .scalar()
         )
-        return int(total or 0)
+        spent = (
+            self.db.query(func.coalesce(func.sum(CreditLedger.amount_cents), 0))
+            .filter(CreditLedger.user_id == user_id, CreditLedger.amount_cents < 0)
+            .scalar()
+        )
+        balance = int((granted or 0) + (spent or 0))
+        return BalanceSummary(
+            balance_cents=balance,
+            total_granted_cents=int(granted or 0),
+            total_spent_cents=int(abs(spent or 0)),
+        )
 
     def list_ledger(self, user_id: int, *, limit: int = 50, offset: int = 0) -> list[CreditLedger]:
-        """Return newest-first ledger entries for the user."""
         normalized_limit = max(1, min(int(limit or 50), self.MAX_PAGE_SIZE))
         normalized_offset = max(0, int(offset or 0))
         return (
@@ -49,6 +75,7 @@ class CreditsService:
         *,
         amount_cents: int,
         source: str,
+        idempotency_key: str,
         source_ref: str | None = None,
         description: str | None = None,
         currency: str = "usd",
@@ -57,36 +84,30 @@ class CreditsService:
         stripe_payment_intent_id: str | None = None,
         commit: bool = True,
     ) -> CreditLedger:
-        """
-        Apply a ledger entry, enforcing idempotency on (user_id, source_ref).
-
-        When source_ref is provided and already stored for the user, the existing
-        row is returned and no new entry is inserted.
-        """
         normalized_source = (source or "").strip().lower()
         if not normalized_source:
             raise ValueError("source is required")
-
         normalized_currency = (currency or "usd").strip().lower() or "usd"
         normalized_ref = source_ref.strip() if isinstance(source_ref, str) and source_ref.strip() else None
         normalized_description = description.strip() if isinstance(description, str) and description.strip() else None
-        cents = int(amount_cents)
+        normalized_idempotency = (idempotency_key or "").strip()
+        if not normalized_idempotency:
+            raise ValueError("idempotency_key is required")
 
-        if normalized_ref:
-            existing = (
-                self.db.query(CreditLedger)
-                .filter(
-                    CreditLedger.user_id == user_id,
-                    CreditLedger.source_ref == normalized_ref,
-                )
-                .first()
+        existing = (
+            self.db.query(CreditLedger)
+            .filter(
+                CreditLedger.user_id == user_id,
+                CreditLedger.idempotency_key == normalized_idempotency,
             )
-            if existing:
-                return existing
+            .first()
+        )
+        if existing:
+            return existing
 
         entry = CreditLedger(
             user_id=user_id,
-            amount_cents=cents,
+            amount_cents=int(amount_cents),
             source=normalized_source,
             source_ref=normalized_ref,
             description=normalized_description,
@@ -102,6 +123,7 @@ class CreditsService:
                 if isinstance(stripe_payment_intent_id, str) and stripe_payment_intent_id.strip()
                 else None
             ),
+            idempotency_key=normalized_idempotency,
         )
         self.db.add(entry)
         if commit:
@@ -111,12 +133,80 @@ class CreditsService:
             self.db.flush()
         return entry
 
+    def spend_credits(
+        self,
+        *,
+        user_id: int,
+        amount_cents: int,
+        reason: str,
+        idempotency_key: str,
+    ) -> CreditLedger:
+        if amount_cents <= 0:
+            raise ValueError("amount_cents must be positive")
+
+        normalized_key = (idempotency_key or "").strip()
+        if not normalized_key:
+            raise ValueError("idempotency_key is required")
+
+        existing = (
+            self.db.query(CreditLedger)
+            .filter(
+                CreditLedger.user_id == user_id,
+                CreditLedger.idempotency_key == normalized_key,
+            )
+            .first()
+        )
+        if existing:
+            return existing
+
+        user_row = (
+            self.db.execute(
+                select(User).where(User.id == user_id).with_for_update()
+            )
+            .scalars()
+            .first()
+        )
+        if not user_row:
+            raise ValueError("User not found")
+
+        balance = self.get_balance_cents(user_id)
+        if balance < amount_cents:
+            raise InsufficientCreditsError("Insufficient credits")
+
+        entry = self.apply_ledger_entry(
+            user_id,
+            amount_cents=-amount_cents,
+            source="usage",
+            description=reason,
+            idempotency_key=normalized_key,
+            commit=False,
+        )
+        self.db.commit()
+        self.db.refresh(entry)
+        return entry
+
+    def require_credits(
+        self,
+        *,
+        user_id: int,
+        amount_cents: int,
+        reason: str,
+        idempotency_key: str,
+    ) -> None:
+        try:
+            self.spend_credits(
+                user_id=user_id,
+                amount_cents=amount_cents,
+                reason=reason,
+                idempotency_key=idempotency_key,
+            )
+        except InsufficientCreditsError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Insufficient credits",
+            ) from exc
+
 
 def format_cents_to_dollars(value: int) -> str:
-    """
-    Convert integer cents into a fixed 0.00 string without float precision issues.
-    """
     decimal_value = (Decimal(value) / Decimal(100)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return f"{decimal_value:.2f}"
-
-

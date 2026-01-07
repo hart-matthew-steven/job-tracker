@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -12,6 +14,7 @@ from app.schemas.billing import (
     CreditLedgerEntryOut,
     CreditPackOut,
     CreditsBalanceOut,
+    DebugSpendCreditsIn,
 )
 from app.services.credits import CreditsService, format_cents_to_dollars
 
@@ -24,11 +27,14 @@ def get_credit_balance(
     user: User = Depends(get_current_user),
 ) -> CreditsBalanceOut:
     service = CreditsService(db)
-    balance_cents = service.get_balance_cents(user.id)
+    summary = service.get_balance_summary(user.id)
     return CreditsBalanceOut(
         currency="usd",
-        balance_cents=balance_cents,
-        balance_dollars=format_cents_to_dollars(balance_cents),
+        balance_cents=summary.balance_cents,
+        balance_dollars=format_cents_to_dollars(summary.balance_cents),
+        lifetime_granted_cents=summary.total_granted_cents,
+        lifetime_spent_cents=summary.total_spent_cents,
+        as_of=datetime.now(timezone.utc),
     )
 
 
@@ -51,6 +57,7 @@ def get_credit_ledger(
             pack_key=entry.pack_key,
             stripe_checkout_session_id=entry.stripe_checkout_session_id,
             stripe_payment_intent_id=entry.stripe_payment_intent_id,
+             idempotency_key=entry.idempotency_key,
         )
         for entry in entries
     ]
@@ -79,6 +86,7 @@ def get_billing_overview(
                 pack_key=entry.pack_key,
                 stripe_checkout_session_id=entry.stripe_checkout_session_id,
                 stripe_payment_intent_id=entry.stripe_payment_intent_id,
+                idempotency_key=entry.idempotency_key,
             )
             for entry in ledger
         ],
@@ -99,5 +107,23 @@ def list_credit_packs() -> list[CreditPackOut]:
             )
         )
     return sorted(packs, key=lambda p: p.credits)
+
+
+@router.post("/credits/debug/spend", status_code=status.HTTP_204_NO_CONTENT)
+def debug_spend_credits(
+    payload: DebugSpendCreditsIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if settings.is_prod or not settings.ENABLE_BILLING_DEBUG_ENDPOINT:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    service = CreditsService(db)
+    service.require_credits(
+        user_id=user.id,
+        amount_cents=payload.amount_cents,
+        reason=payload.reason,
+        idempotency_key=payload.idempotency_key,
+    )
 
 

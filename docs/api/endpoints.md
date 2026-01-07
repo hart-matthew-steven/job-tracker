@@ -98,8 +98,9 @@ Guidelines:
 
 - `GET /billing/credits/balance`
   - Auth: Bearer
-  - Response: `{ "currency": "usd", "balance_cents": 5500, "balance_dollars": "55.00" }`
-  - Notes: Uses integer cents from the credit ledger. The string dollars field is presentation-only for the UI.
+  - Response: `{ "currency": "usd", "balance_cents": 5500, "balance_dollars": "55.00", "lifetime_granted_cents": 7000, "lifetime_spent_cents": 1500, "as_of": "2026-01-06T12:34:56Z" }`
+  - Notes: All values come from live `credit_ledger` sums on every request—there is no cached balance.
+  - Future AI endpoints will call `require_credits(...)` before executing and will return HTTP `402 PAYMENT_REQUIRED` if the user lacks sufficient credits.
 
 - `GET /billing/credits/ledger?limit=50&offset=0`
   - Auth: Bearer
@@ -126,6 +127,11 @@ Guidelines:
   - Auth: Stripe signature header (`Stripe-Signature`)
   - Body: Raw Stripe event JSON
   - Notes: Validates the signature, inserts/locks a `stripe_events` row, and uses metadata (`user_id`, `pack_key`, `credits_to_grant`) on `checkout.session.completed` events to mint a single ledger entry. Duplicate events short-circuit once the `stripe_event_id` is recorded. Failures mark `stripe_events.status=failed` and return HTTP 500 so Stripe retries.
+
+- `POST /billing/credits/debug/spend`
+  - Auth: Bearer (only available when `ENABLE_BILLING_DEBUG_ENDPOINT=true` and `ENV!=prod`)
+  - Body: `{ "amount_cents": 250, "reason": "dev smoke test", "idempotency_key": "debug-1" }`
+  - Notes: Dev-only helper to simulate credit consumption without going through the paid AI flow. Uses the same `spend_credits/require_credits` path the future OpenAI integration will call.
 
 ---
 

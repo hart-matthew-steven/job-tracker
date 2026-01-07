@@ -25,12 +25,14 @@ class CreditLedger(Base):
     pack_key = Column(String(50), nullable=True)
     stripe_checkout_session_id = Column(String(255), nullable=True, index=True)
     stripe_payment_intent_id = Column(String(255), nullable=True, index=True)
+    idempotency_key = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
     user = relationship("User", backref="credit_ledger_entries")
 
     __table_args__ = (
         UniqueConstraint("user_id", "source_ref", name="uq_credit_ledger_user_source_ref"),
+        UniqueConstraint("user_id", "idempotency_key", name="uq_credit_ledger_user_idempotency"),
     )
 
 

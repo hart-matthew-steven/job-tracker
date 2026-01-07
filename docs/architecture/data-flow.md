@@ -204,7 +204,8 @@ Key behaviors:
 - Only the webhook can mint credits. Even if the checkout endpoint is spammed or the frontend drops, no credits are issued until Stripe proves the payment succeeded via a signed webhook and we’ve locked the relevant `stripe_events` row.
 - Idempotency lives in two layers:
 - `stripe_events.stripe_event_id` is unique, so re-delivered events are recorded once and marked `skipped`.
-- `credit_ledger` already enforces `(user_id, source_ref)` uniqueness. `source_ref` is set to `stripe_event_id`, so the same event can never credit twice even if the webhook retries while a DB transaction is inflight.
+- `credit_ledger` enforces `(user_id, idempotency_key)` uniqueness. Stripe deposits use `event_id-deposit`; future spends use their own `idempotency_key`. Even if a webhook or usage call retries, the ledger row is written at most once.
+- Spending is also ledger-driven: `spend_credits(user_id, amount, reason, idempotency_key)` locks the user row, recomputes the current balance, and inserts a negative ledger row only when the user has enough credits. If the balance is insufficient, the call fails with HTTP 402 and no rows are written.
 - Failures (missing metadata, DB errors, etc.) set `stripe_events.status=failed`, capture the error message, and return HTTP 500 so Stripe retries instead of silently losing the purchase.
 - Future AI usage charges will consume the credits that were minted here and log mirrored facts into `ai_usage` so USD costs remain explainable.
 

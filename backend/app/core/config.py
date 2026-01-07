@@ -132,6 +132,7 @@ class Settings:
         self.STRIPE_DEFAULT_CURRENCY = (os.getenv("STRIPE_DEFAULT_CURRENCY", "usd").strip().lower() or "usd")
         stripe_price_map_raw = os.getenv("STRIPE_PRICE_MAP", "")
         self.STRIPE_PRICE_MAP = self._parse_stripe_price_map(stripe_price_map_raw)
+        self.ENABLE_BILLING_DEBUG_ENDPOINT = str_to_bool(os.getenv("ENABLE_BILLING_DEBUG_ENDPOINT", "false"))
 
         # Final: fail fast in prod
         self._validate_prod()

@@ -417,6 +417,19 @@ Record decisions that affect structure or long-term direction.
 
 ---
 
+## 2026-01-06 — Credits balance + spend guardrails
+- Decision: keep the ledger as the source of truth (no cached balance column) and add `spend_credits/require_credits` helpers that lock the user row, recompute the live balance, and insert negative rows with per-user `idempotency_key`s.
+- Rationale:
+  - Ledger-only math keeps audit trails intact and makes retries/idempotency trivial—credits are money, so every mutation must be explainable.
+  - Locking the user row + re-reading the ledger avoids “double spend” races when multiple AI calls arrive at the same time.
+  - Surfacing `balance`, `lifetime_granted`, and `lifetime_spent` gives the UI and customer support the data they need to explain charges/refunds.
+- Consequences:
+  - `credit_ledger` gained `idempotency_key` and new metadata fields are required on every insert.
+  - `GET /billing/credits/balance` and `GET /billing/me` now pull directly from the ledger and include audit-friendly fields.
+  - A dev-only `/billing/credits/debug/spend` endpoint exists for local smoke tests; production stays disabled unless explicitly enabled via `ENABLE_BILLING_DEBUG_ENDPOINT`.
+
+---
+
 ## 2026-01-05 — Stripe prepaid credits hardening
 - Decision: Gate checkout by `pack_key`, store `stripe_events` with `status`/`error` for idempotency, and mint credits exclusively from the webhook.
 - Rationale:

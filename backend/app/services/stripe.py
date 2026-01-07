@@ -242,6 +242,7 @@ class StripeService:
             user.id,
             amount_cents=credits_to_grant,
             source="stripe",
+            idempotency_key=f"{event.get('id')}-deposit",
             source_ref=event.get("id"),
             description=description,
             currency=self.currency,

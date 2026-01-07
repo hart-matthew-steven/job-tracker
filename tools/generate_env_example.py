@@ -117,6 +117,7 @@ GROUPS: list[Group] = [
             "STRIPE_WEBHOOK_SECRET",
             "STRIPE_DEFAULT_CURRENCY",
             "STRIPE_PRICE_MAP",
+            "ENABLE_BILLING_DEBUG_ENDPOINT",
         ),
     ),
 ]

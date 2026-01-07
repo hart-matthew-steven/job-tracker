@@ -90,3 +90,6 @@
 - Consolidate backend user/settings responses (use dedicated settings schema for `/users/me/settings`)
 - Phase 2: dev reset script implemented: `temp_scripts/reset_dev_db.py` (guardrails, S3 cleanup, logs, `--yes`)
 - Stripe prepaid credits foundation hardened: `STRIPE_PRICE_MAP` pack config, `/billing/me` + `/billing/packs`, transactional webhook that updates `stripe_events` status + `credit_ledger` pack metadata. AI usage charging still to come (future chunk).
+- Credits balance & guardrails (this step):
+  - `/billing/credits/balance` now returns live balance + lifetime grant/spend totals and an `as_of` timestamp.
+  - `credit_ledger` rows include a per-user `idempotency_key`, and `spend_credits/require_credits` lock the user row, enforce “no negative balances,” and raise HTTP 402 on insufficient credits. Debug spend endpoint is available only when explicitly enabled outside prod.
