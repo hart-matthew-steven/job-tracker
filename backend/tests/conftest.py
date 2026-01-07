@@ -101,6 +101,7 @@ def _reset_mutable_settings():
         "STRIPE_WEBHOOK_SECRET",
         "STRIPE_DEFAULT_CURRENCY",
         "STRIPE_PRICE_MAP",
+        "ENABLE_BILLING_DEBUG_ENDPOINT",
     ]
     original = {k: getattr(app_config.settings, k) for k in keys}
     try:

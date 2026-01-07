@@ -64,7 +64,7 @@ Keep it concise, factual, and employer-facing.
   - `STRIPE_PRICE_MAP` configures credit packs (`pack_key:price_id:credits`). `/billing/stripe/checkout` only accepts a `pack_key` and stamps metadata (`user_id`, `pack_key`, `credits_to_grant`, `environment`) into the Checkout Session so the webhook can mint credits deterministically.
   - `/billing/stripe/webhook` validates the signature, inserts `stripe_events` (`status=pending`), runs the handler transactionally, writes to `credit_ledger` with pack/session metadata + `idempotency_key`, and updates status to `processed|skipped|failed`. Failures capture the error and return HTTP 500 so Stripe retries.
   - `/billing/me` exposes the balance + Stripe customer id + the latest ledger entries; `/billing/packs` surfaces the configured packs for the frontend. `/billing/credits/balance` now also reports lifetime grants/spend and an `as_of` timestamp.
-  - `spend_credits/require_credits` locks the user row, re-checks the live ledger balance, inserts a negative row if funds are available, and raises HTTP 402 if they are not. Every spend must include a per-user `idempotency_key`. Future OpenAI calls will go through this helper before (or immediately after) invoking the model.
+  - `reserve_credits`/`finalize_charge`/`refund_reservation` form the enforcement layer: reserve rows (`entry_type=ai_reserve`) reduce the available balance immediately, finalize rewrites the ledger with `ai_release` + `ai_charge`, and refunds write `ai_refund`. Each step is idempotent via its own `idempotency_key`. `/ai/demo` uses those APIs to simulate AI usage until the OpenAI integration lands.
 
 ## What Is Working
 - Cognito signup → confirm → login → MFA setup/verify → authenticated app access.

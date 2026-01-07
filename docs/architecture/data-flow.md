@@ -209,6 +209,14 @@ Key behaviors:
 - Failures (missing metadata, DB errors, etc.) set `stripe_events.status=failed`, capture the error message, and return HTTP 500 so Stripe retries instead of silently losing the purchase.
 - Future AI usage charges will consume the credits that were minted here and log mirrored facts into `ai_usage` so USD costs remain explainable.
 
+### Credits reservation flow (pre-OpenAI)
+
+1. `reserve_credits` locks the user row (`SELECT ... FOR UPDATE`), verifies the live ledger balance, and writes an `ai_reserve` row (`amount_cents` negative, `status=reserved`, `correlation_id=uuid4`). This immediately reduces the available balance so concurrent AI requests cannot overspend.
+2. If the downstream work succeeds, `finalize_charge` writes an `ai_release` row (+reserved amount) followed by an `ai_charge` row (−actual amount). The original `ai_reserve` row is marked `finalized`, so additional finalize attempts simply return the already-posted ledger entries.
+3. If the work fails, `refund_reservation` writes an `ai_refund` row (+reserved amount) and marks the reservation `refunded`. Refund-after-finalize is rejected so we do not silently undo settled usage.
+4. Each step requires its own per-user `idempotency_key` (e.g., `demo-1::reserve`, `demo-1::finalize`). Retried HTTP requests reuse the same ledger entries, keeping the flow idempotent end-to-end.
+5. `POST /ai/demo` wires these primitives together to validate the behavior locally until the real OpenAI endpoints are ready.
+
 ---
 
 ## Dev vs Prod Differences

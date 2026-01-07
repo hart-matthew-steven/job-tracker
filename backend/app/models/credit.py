@@ -26,6 +26,9 @@ class CreditLedger(Base):
     stripe_checkout_session_id = Column(String(255), nullable=True, index=True)
     stripe_payment_intent_id = Column(String(255), nullable=True, index=True)
     idempotency_key = Column(String(255), nullable=False)
+    entry_type = Column(String(50), nullable=False, server_default="credit_purchase")
+    status = Column(String(20), nullable=False, server_default="posted")
+    correlation_id = Column(String(255), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
     user = relationship("User", backref="credit_ledger_entries")

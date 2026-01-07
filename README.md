@@ -298,7 +298,13 @@ You’ll receive a new `access_token`/`id_token`. The SPA’s `tokenManager` doe
 - Credits are sold in fixed packs configured via `STRIPE_PRICE_MAP` (`pack_key:price_id:credits`). The backend accepts only a `pack_key`, resolves the Stripe Price ID + credit quantity, and writes that metadata (`user_id`, `pack_key`, `credits_to_grant`, `environment`) into the Checkout Session and PaymentIntent so clients cannot spoof amounts.
 - Users are linked to Stripe Customers (`users.stripe_customer_id`). `GET /billing/credits/balance`/`GET /billing/me` return the current balance, lifetime grants/spend, Stripe customer id (if present), and the latest `credit_ledger` rows (with pack + Stripe ids). This is the UI/SDK-friendly surface for displaying "credits left".
 - `/billing/stripe/webhook` is the sole minting path. Every event is inserted into `stripe_events` with `status=pending` before any business logic runs; the handler verifies `checkout.session.completed` events are paid, uses the metadata to locate the user + pack, inserts a single ledger entry (`source=stripe`, `source_ref=stripe_event_id`, `pack_key`, `idempotency_key`), and updates `stripe_events.status` to `processed|skipped`. Failures mark the row `failed`, capture the error, and return HTTP 500 so Stripe retries.
-- Spending is ledger-only and fully idempotent. `spend_credits(user_id, amount_cents, reason, idempotency_key)` locks the user row, re-checks the live balance, and inserts a negative ledger row with its own per-user `idempotency_key`. Attempting to spend more than the current balance raises an `HTTP 402 Payment Required` via `require_credits(...)`. This is what future OpenAI calls will use before/after hitting the model.
+- Paid feature enforcement happens in two steps so flaky AI calls never double charge:
+  1. `reserve_credits(user_id, amount, idempotency_key)` locks the user row and inserts an `entry_type=ai_reserve` ledger row (negative amount, status `reserved`, correlation id). If there aren’t enough funds it raises `InsufficientCreditsError` and the API surfaces HTTP 402.
+  2. On success we either:
+     - `finalize_charge(reservation_id, actual_amount, idempotency_key)` → writes `ai_release` (+reserved amount) followed by `ai_charge` (−actual cost) so the ledger nets to the true spend; or
+     - `refund_reservation(reservation_id, idempotency_key)` → writes `ai_refund` (+reserved) and marks the hold as refunded.
+  Each call supplies a unique idempotency key, so retried requests reuse the existing rows instead of double spending.
+- `POST /ai/demo` uses those primitives today so engineers can simulate “AI usage” locally: it reserves credits, optionally finalizes with a different actual cost, or refunds if `simulate_outcome=fail`. This endpoint is dev-only documentation for how real AI routes should behave; the future OpenAI integration will call the same service methods before talking to OpenAI.
 - Local test loop:
 
 ```bash
@@ -322,6 +328,12 @@ curl -s -X POST http://localhost:8000/billing/credits/debug/spend \
   -H "Authorization: $ACCESS" \
   -H "Content-Type: application/json" \
   -d '{"amount_cents":250,"reason":"dev test","idempotency_key":"debug-1"}'
+
+# 5. Exercise the reservation/finalize/refund flow without OpenAI
+curl -s -X POST http://localhost:8000/ai/demo \
+  -H "Authorization: $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{"idempotency_key":"demo-123","estimated_cost_credits":1200,"simulate_outcome":"success","actual_cost_credits":900}'
 ```
 
 ### CI/CD pipelines

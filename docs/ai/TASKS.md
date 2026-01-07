@@ -93,3 +93,7 @@
 - Credits balance & guardrails (this step):
   - `/billing/credits/balance` now returns live balance + lifetime grant/spend totals and an `as_of` timestamp.
   - `credit_ledger` rows include a per-user `idempotency_key`, and `spend_credits/require_credits` lock the user row, enforce “no negative balances,” and raise HTTP 402 on insufficient credits. Debug spend endpoint is available only when explicitly enabled outside prod.
+- Credits reservation layer:
+  - Added `entry_type/status/correlation_id` columns so we can post `ai_reserve`, `ai_release`, `ai_charge`, and `ai_refund` rows.
+  - `reserve_credits`, `finalize_charge`, and `refund_reservation` wrap the ledger writes with per-step idempotency keys plus DB-level locking.
+  - `/ai/demo` exercises the full reserve/finalize/refund flow until OpenAI endpoints use the same helper.

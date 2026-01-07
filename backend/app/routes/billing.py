@@ -57,7 +57,10 @@ def get_credit_ledger(
             pack_key=entry.pack_key,
             stripe_checkout_session_id=entry.stripe_checkout_session_id,
             stripe_payment_intent_id=entry.stripe_payment_intent_id,
-             idempotency_key=entry.idempotency_key,
+            idempotency_key=entry.idempotency_key,
+            entry_type=entry.entry_type,
+            status=entry.status,
+            correlation_id=entry.correlation_id,
         )
         for entry in entries
     ]
@@ -87,6 +90,9 @@ def get_billing_overview(
                 stripe_checkout_session_id=entry.stripe_checkout_session_id,
                 stripe_payment_intent_id=entry.stripe_payment_intent_id,
                 idempotency_key=entry.idempotency_key,
+                entry_type=entry.entry_type,
+                status=entry.status,
+                correlation_id=entry.correlation_id,
             )
             for entry in ledger
         ],

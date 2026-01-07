@@ -430,6 +430,19 @@ Record decisions that affect structure or long-term direction.
 
 ---
 
+## 2026-01-06 — Reservation + finalize/refund workflow
+- Decision: implement reservation/finalize/refund primitives directly on the ledger with `entry_type`, `status`, `correlation_id`, and per-step idempotency keys, plus a dev-only `/ai/demo` endpoint to exercise the flow before OpenAI lands.
+- Rationale:
+  - Holding credits up front avoids race conditions when multiple AI calls fire concurrently and guarantees we can refund if the downstream call fails.
+  - Ledger immutability (reserve row + release row + charge row) keeps accounting auditable while still letting us reconcile actual vs. estimated usage.
+  - A dedicated demo endpoint makes it easy to test the happy path and failure path locally without wiring up OpenAI yet.
+- Consequences:
+  - `credit_ledger` rows now include metadata needed to tie Stripe grants, AI reserves, releases, charges, and refunds together.
+  - Service-layer helpers (`reserve_credits`, `finalize_charge`, `refund_reservation`) are the contract future AI endpoints must use before/after invoking OpenAI.
+  - `/ai/demo` shows how clients must include `idempotency_key`, estimated cost, and optional `actual_cost_credits` to remain idempotent.
+
+---
+
 ## 2026-01-05 — Stripe prepaid credits hardening
 - Decision: Gate checkout by `pack_key`, store `stripe_events` with `status`/`error` for idempotency, and mint credits exclusively from the webhook.
 - Rationale:

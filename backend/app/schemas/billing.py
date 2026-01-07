@@ -24,6 +24,9 @@ class CreditLedgerEntryOut(BaseModel):
     stripe_checkout_session_id: str | None = None
     stripe_payment_intent_id: str | None = None
     idempotency_key: str
+    entry_type: str
+    status: str
+    correlation_id: str | None = None
 
 
 class StripeCheckoutCreate(BaseModel):
@@ -73,4 +76,34 @@ class DebugSpendCreditsIn(BaseModel):
         if value <= 0:
             raise ValueError("amount_cents must be positive")
         return value
+
+
+class AiDemoRequest(BaseModel):
+    idempotency_key: str
+    estimated_cost_credits: int
+    simulate_outcome: str
+    actual_cost_credits: int | None = None
+
+    @field_validator("simulate_outcome")
+    @staticmethod
+    def _validate_outcome(value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in {"success", "fail"}:
+            raise ValueError("simulate_outcome must be 'success' or 'fail'")
+        return normalized
+
+    @field_validator("estimated_cost_credits")
+    @staticmethod
+    def _validate_estimated(value: int) -> int:
+        if value <= 0:
+            raise ValueError("estimated_cost_credits must be positive")
+        return value
+
+
+class AiDemoResponse(BaseModel):
+    reservation_id: int
+    correlation_id: str
+    status: str
+    balance_cents: int
+    ledger_entries: list[CreditLedgerEntryOut]
 

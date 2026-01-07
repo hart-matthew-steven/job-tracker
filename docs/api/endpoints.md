@@ -135,6 +135,24 @@ Guidelines:
 
 ---
 
+## AI demo / reservation stub
+
+- `POST /ai/demo`
+  - Auth: Bearer
+  - Body:
+    ```
+    {
+      "idempotency_key": "demo-123",
+      "estimated_cost_credits": 1200,
+      "simulate_outcome": "success" | "fail",
+      "actual_cost_credits": 900   # optional override when simulate_outcome=success
+    }
+    ```
+  - Response: `{ reservation_id, correlation_id, status: "success"|"refunded", balance_cents, ledger_entries: [...] }`
+  - Notes: Reserves credits (`entry_type=ai_reserve`), then either releases + charges (`ai_release` + `ai_charge`) or refunds (`ai_refund`). This endpoint is a smoke test for the reservation/finalize/refund primitives that real AI routes will call before contacting OpenAI.
+
+---
+
 ## Jobs
 
 - `GET /jobs`
