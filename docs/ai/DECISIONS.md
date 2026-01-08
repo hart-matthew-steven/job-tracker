@@ -11,6 +11,28 @@ Record decisions that affect structure or long-term direction.
 
 ---
 
+## 2026-01-07 — AI chat sessions + guardrails
+- Decision: Persist AI conversations in `ai_conversations`/`ai_messages`, extend `ai_usage` with conversation/message references + idempotency keys, and expose `/ai/conversations*` APIs backed by `AIConversationService`, buffered OpenAI calls, durable ledger entries, and per-user rate/concurrency limiters.
+- Rationale: Stripe already front-loads spend into prepaid credits; production AI usage requires durable history, strict idempotency, and backpressure so we never double-charge or run workloads beyond the user’s balance.
+- Consequences:
+  - Database: new Alembic migration adds `ai_conversations`, `ai_messages`, and additional columns/indexes on `ai_usage`. ORM models + Alembic env import the new tables.
+  - Services: `AIConversationService` owns context trimming, persistence, and OpenAI orchestration. `AIUsageOrchestrator` gained correlation ids, OpenAI retries with jitter, response id storage, and “charge delta only if balance allows” settlement logic.
+  - Config: `.env.example`/`Settings` include `AI_MAX_INPUT_CHARS`, `AI_MAX_CONTEXT_MESSAGES`, `AI_REQUESTS_PER_MINUTE`, `AI_MAX_CONCURRENT_REQUESTS`, `AI_OPENAI_MAX_RETRIES`, and `AI_COMPLETION_TOKENS_MAX=3000`.
+  - API: new endpoints (`POST/GET /ai/conversations`, `GET /ai/conversations/{id}`, `POST /ai/conversations/{id}/messages`) return paged messages + credit deltas; `/ai/chat` responses now include `usage_id` + `response_id`.
+  - Guardrails: custom rate/concurrency limiters raise HTTP 429, insufficient funds raise HTTP 402 (reservation refunded), OpenAI outages return HTTP 503, and every OpenAI call writes a single `ai_usage` row + ledger entry.
+
+## 2026-01-08 — DynamoDB-backed request limiting
+- Decision: Replace the SlowAPI/in-memory limiter with a DynamoDB-backed fixed-window limiter keyed by `pk=user:{user_id}|ip:{address}` and `sk=route:{route_key}:window:{seconds}`, storing `window_start`, `count`, and `expires_at` (TTL).
+- Rationale: App Runner can scale horizontally, so per-process state was inaccurate and hard to reason about. DynamoDB provides conditional updates + TTL for pennies, eliminating the need for Redis/ElastiCache.
+- Consequences:
+  - Added env knobs `RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, `RATE_LIMIT_DEFAULT_WINDOW_SECONDS`, `RATE_LIMIT_DEFAULT_MAX_REQUESTS`, `AI_RATE_LIMIT_WINDOW_SECONDS`, `AI_RATE_LIMIT_MAX_REQUESTS`.
+  - New FastAPI dependency `require_rate_limit(...)` now guards `/ai/*`, `/auth/cognito/*`, and document presign uploads, returning HTTP 429 with `Retry-After` when limits are exceeded.
+  - Tests use `botocore.stub.Stubber` to simulate `UpdateItem` success/ConditionalCheckFailed flows and ensure API routes emit 429 when the limiter fires.
+
+---
+
+---
+
 ## 2025-12-18 — Repo hygiene boundaries (docs/logs/temp scripts)
 - Decision: Separate documentation, outputs/logs, and one-off scripts into top-level folders:
   - `docs/` for documentation

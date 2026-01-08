@@ -181,6 +181,17 @@ docker buildx build \
 
 After the image is pushed, point the App Runner service at the new ECR tag (or update the service via IaC/console). App Runner pulls the image, injects environment variables from Secrets Manager, and exposes the service at the subdomain above.
 
+### Rate limiting (DynamoDB)
+
+- Request-level limits (for `/auth/cognito/*`, `/ai/*`, and document upload presigns) use the shared DynamoDB table `jobapptracker-rate-limits`.
+- Key design:
+  - `pk = user:{user_id}` for authenticated requests or `ip:{client_ip}` for anonymous callers.
+  - `sk = route:{route_key}:window:{window_seconds}`.
+  - Attributes: `window_start`, `count`, and `expires_at`. DynamoDB’s TTL evicts expired windows automatically so App Runner instances stay in sync without Redis/ElastiCache.
+- The FastAPI dependency `require_rate_limit(route_key, limit, window_seconds)` increments the counter via `UpdateItem` with a conditional expression. If the count exceeds the configured limit we raise HTTP 429 with a `Retry-After` header before touching business logic (or credits).
+- Configuration knobs (defaults are dev-friendly): `RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, `RATE_LIMIT_DEFAULT_WINDOW_SECONDS`, `RATE_LIMIT_DEFAULT_MAX_REQUESTS`, plus the AI-specific values `AI_RATE_LIMIT_WINDOW_SECONDS` / `AI_RATE_LIMIT_MAX_REQUESTS`.
+- Local development keeps the limiter disabled (`RATE_LIMIT_ENABLED=false`). To exercise it locally, set the env vars above and provide AWS credentials with DynamoDB access; otherwise the Noop limiter is used.
+
 ## Authentication (Cognito – Production Cutover)
 
 ### Architecture overview
@@ -208,7 +219,7 @@ After the image is pushed, point the App Runner service at the new ECR tag (or u
 - **Token storage**: access/id tokens remain in memory + `sessionStorage`. Refresh tokens are stored in `sessionStorage` only (never cookies). Documentation recommends CSP (`default-src 'self'; script-src 'self' 'strict-dynamic' ...`) and dependency hygiene to mitigate XSS.
 - **Authorization**: backend rejects any Bearer token that is not a Cognito access token signed with the expected key + `client_id`. Unknown `token_use` values are denied.
 - **Logging**: no access/refresh/id token values are logged. Structured logs record only result codes (OK/CHALLENGE/FAIL) and anonymized Cognito subjects.
-- **Rate limiting**: all `/auth/cognito/*` routes are decorated via SlowAPI. Enable `ENABLE_RATE_LIMITING=true` in prod and back the limiter with Redis/Elasticache.
+- **Rate limiting**: `/auth/cognito/*`, `/ai/*`, and document upload routes share a DynamoDB-backed limiter (`jobapptracker-rate-limits`). Each request increments `{pk=user:{id}|ip:{addr}, sk=route:{route_key}:window:{seconds}}` with a TTL-based expiry. Enable it in prod via `RATE_LIMIT_ENABLED=true`, `DDB_RATE_LIMIT_TABLE`, and `AWS_REGION`; local dev can leave it disabled to avoid AWS dependencies.
 - **CSRF**: there are no auth cookies. All requests are Bearer tokens via `Authorization` headers, which are not sent cross-site by browsers unless explicitly added.
 - **MFA**: required for every user. QR secrets are shown once and never logged/persisted server-side. Existing devices can re-enroll via `/auth/cognito/mfa/setup` with an access token if needed.
 - **CORS**: allow only the exact SPA origins in production (e.g., `https://jobapptracker.dev`). Local dev defaults (`http://localhost:5173`) are appended automatically when `ENV=dev`.
@@ -224,6 +235,30 @@ After the image is pushed, point the App Runner service at the new ECR tag (or u
   - Backend (`.env.example`): `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`.
   - Frontend: `VITE_TURNSTILE_SITE_KEY` (or `window.__TURNSTILE_SITE_KEY__` while prototyping).
 - Use Cloudflare’s public test keys for local dev (<https://developers.cloudflare.com/turnstile/get-started/>). Monitoring should alert on signup 4xx/5xx spikes in case CAPTCHA starts failing or abuse ramps up.
+
+## Rate Limiting (DynamoDB)
+
+- **Why DynamoDB?** App Runner services can scale horizontally at any time, so the old in-memory/SlowAPI limiter either had to run on a single instance or risk being bypassed. DynamoDB gives us per-item conditional updates, TTL expiry, and essentially zero maintenance without introducing Redis/ElastiCache.
+- **Table layout:** `pk=user:{user_id}` (or `ip:{remote_addr}` for unauthenticated requests), `sk=route:{route_key}:window:{seconds}`, attributes `window_start`, `count`, `expires_at` (used for TTL). Every request runs a single `UpdateItem`. If the `window_start` has changed, the limiter resets the counter and starts a new window.
+- **Config knobs:** `RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, `RATE_LIMIT_DEFAULT_WINDOW_SECONDS`, `RATE_LIMIT_DEFAULT_MAX_REQUESTS`, plus AI-specific knobs `AI_RATE_LIMIT_WINDOW_SECONDS`/`AI_RATE_LIMIT_MAX_REQUESTS`. Local `.env` leaves the limiter disabled by default; set those vars plus `AWS_REGION` to exercise it.
+- **Where it applies:** `/ai/chat`, `/ai/conversations*`, `/ai/demo`, `/auth/cognito/*`, and `/jobs/{id}/documents/presign-upload`. Rate-limited endpoints return HTTP 429 with a `Retry-After` header and `details.retry_after_seconds` payload.
+- **Manual test:**
+
+  ```bash
+  export RATE_LIMIT_ENABLED=true
+  export DDB_RATE_LIMIT_TABLE=jobapptracker-rate-limits
+  export AWS_REGION=us-east-1  # adjust as needed
+  ACCESS="Bearer $(cat /tmp/access_token)"
+  for i in {1..12}; do
+    curl -s -o /dev/null -w "%{http_code}\n" \
+      -H "Authorization: $ACCESS" \
+      -H "Content-Type: application/json" \
+      -d '{"request_id":"limit-test","messages":[{"role":"user","content":"hi"}]}' \
+      http://localhost:8000/ai/chat
+  done
+  ```
+
+  The first few calls return 200; subsequent ones return 429 with `Retry-After`.
 
 ### Local development flow
 
@@ -282,7 +317,7 @@ You’ll receive a new `access_token`/`id_token`. The SPA’s `tokenManager` doe
 
 - [ ] `COGNITO_REGION`, `COGNITO_USER_POOL_ID`, `COGNITO_APP_CLIENT_ID` present in App Runner/Secrets Manager.
 - [ ] CORS origins limited to `https://jobapptracker.dev` + `https://www.jobapptracker.dev`.
-- [ ] `ENABLE_RATE_LIMITING=true` with SlowAPI backed by Redis/Elasticache.
+- [ ] `RATE_LIMIT_ENABLED=true` with `DDB_RATE_LIMIT_TABLE` + IAM allowing `dynamodb:UpdateItem/DescribeTable` for the limiter table.
 - [ ] CloudFront (or ALB) configured with CSP/HSTS (`strict-transport-security: max-age=63072000; includeSubDomains; preload`).
 - [ ] Cognito App Client configured with `USER_PASSWORD_AUTH`, `REFRESH_TOKEN_AUTH`, and MFA = SOFTWARE_TOKEN_MFA (required).
 - [ ] Frontend built with `VITE_API_BASE_URL=https://api.jobapptracker.dev`.
@@ -347,6 +382,38 @@ curl -s -X POST http://localhost:8000/ai/chat \
           {"role": "user", "content": "Summarize my weekly wins."}
         ]
       }'
+```
+
+### AI conversations + guardrails
+
+- Durable storage lives in `ai_conversations` (per conversation) and `ai_messages` (per message). `ai_usage` rows now link back to both the conversation and the assistant message so every OpenAI call has a single usage/ledger footprint.
+- New endpoints:
+  - `POST /ai/conversations` – creates a conversation; optional `message` triggers an immediate completion.
+  - `GET /ai/conversations` – lists the authenticated user’s conversations (paged by `limit`/`offset`).
+  - `GET /ai/conversations/{id}` – returns metadata + paged messages (oldest-first).
+  - `POST /ai/conversations/{id}/messages` – appends a user message, runs the OpenAI workflow, persists the assistant reply, and returns `{user_message, assistant_message, credits_used_cents, credits_refunded_cents, credits_reserved_cents, credits_remaining_*}`.
+- Guardrails: per-user rate limiting (`AI_REQUESTS_PER_MINUTE`), concurrency limiting (`AI_MAX_CONCURRENT_REQUESTS`), context trimming (`AI_MAX_CONTEXT_MESSAGES`), max user input (`AI_MAX_INPUT_CHARS`), retry budget (`AI_OPENAI_MAX_RETRIES`), and a higher completion cap (`AI_COMPLETION_TOKENS_MAX=3000`). All are documented in `.env.example` and parsed in `app/core/config.py`.
+- Settlement logic now handles overruns safely: if actual cost exceeds the reservation we finalize the reserved amount, attempt to spend the delta via `CreditsService.spend_credits`, and refund/return HTTP 402 when the user lacks funds—no negative balances or silent absorption.
+- Example conversation loop (after seeding credits):
+
+```bash
+# Create a conversation with an initial prompt
+curl -s -X POST http://localhost:8000/ai/conversations \
+  -H "Authorization: $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Resume polish","message":"Review my summary"}' | jq
+
+# List conversations
+curl -s -H "Authorization: $ACCESS" http://localhost:8000/ai/conversations | jq
+
+# Fetch the latest messages (conversation id 42 shown here)
+curl -s -H "Authorization: $ACCESS" http://localhost:8000/ai/conversations/42?limit=20 | jq
+
+# Send another message within the same conversation
+curl -s -X POST http://localhost:8000/ai/conversations/42/messages \
+  -H "Authorization: $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"Draft a thank-you email for Acme"}' | jq
 ```
 
 ### CI/CD pipelines

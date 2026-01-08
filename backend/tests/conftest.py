@@ -10,6 +10,7 @@ import importlib
 from app.core.base import Base
 from app.core import config as app_config
 from app.core.config import StripeCreditPack
+from app.services import rate_limiter as rate_limiter_service
 
 # Import models so they register with SQLAlchemy metadata.
 from app.models.user import User  # noqa: F401
@@ -87,7 +88,11 @@ def _reset_mutable_settings():
         "MAX_UPLOAD_BYTES",
         "MAX_PENDING_UPLOADS_PER_JOB",
         "DOC_SCAN_SHARED_SECRET",
-        "ENABLE_RATE_LIMITING",
+        "RATE_LIMIT_ENABLED",
+        "RATE_LIMIT_DEFAULT_WINDOW_SECONDS",
+        "RATE_LIMIT_DEFAULT_MAX_REQUESTS",
+        "AI_RATE_LIMIT_WINDOW_SECONDS",
+        "AI_RATE_LIMIT_MAX_REQUESTS",
         "PASSWORD_MIN_LENGTH",
         "GUARD_DUTY_ENABLED",
         "EMAIL_VERIFICATION_ENABLED",
@@ -112,8 +117,8 @@ def _reset_mutable_settings():
     finally:
         for k, v in original.items():
             setattr(app_config.settings, k, v)
-        # Default all tests to "rate limiting disabled" unless a test explicitly reloads routes with it enabled.
-        app_config.settings.ENABLE_RATE_LIMITING = False
+        app_config.settings.RATE_LIMIT_ENABLED = False
+        rate_limiter_service.reset_rate_limiter()
 
 
 @pytest.fixture()
@@ -123,7 +128,7 @@ def app(db_session, monkeypatch):
     app_config.settings.COGNITO_USER_POOL_ID = app_config.settings.COGNITO_USER_POOL_ID or "local-test-pool"
     app_config.settings.COGNITO_APP_CLIENT_ID = app_config.settings.COGNITO_APP_CLIENT_ID or "test-client-id"
     app_config.settings.COGNITO_JWKS_CACHE_SECONDS = 60
-    app_config.settings.ENABLE_RATE_LIMITING = False
+    app_config.settings.RATE_LIMIT_ENABLED = False
     app_config.settings.RESEND_API_KEY = app_config.settings.RESEND_API_KEY or "test-resend-key"
     app_config.settings.RESEND_FROM_EMAIL = app_config.settings.RESEND_FROM_EMAIL or "Job Tracker <noreply@example.test>"
     app_config.settings.FRONTEND_BASE_URL = app_config.settings.FRONTEND_BASE_URL or "http://localhost:5173"
@@ -132,11 +137,8 @@ def app(db_session, monkeypatch):
     if not app_config.settings.AI_CREDITS_RESERVE_BUFFER_PCT:
         app_config.settings.AI_CREDITS_RESERVE_BUFFER_PCT = 25
 
-    # SlowAPI decorators bind at import time, so reload routes with latest settings.
-    import app.routes.documents as documents_routes
     import app.main as main
 
-    importlib.reload(documents_routes)
     importlib.reload(main)
     fastapi_app = main.app
 

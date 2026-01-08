@@ -1,71 +1,76 @@
 from __future__ import annotations
 
-import importlib
-
-import pytest
 from fastapi.testclient import TestClient
+import pytest
 
-from app.core import config as app_config
-from app.core.database import get_db
+from app.services import rate_limiter as rate_limiter_module
+from app.services.ai_usage import AIChatResult
+from app.services.rate_limiter import RateLimitResult
+
+
+class _CountingLimiter:
+    def __init__(self, allowed_requests: int, retry_after: int = 5):
+        self.allowed_requests = allowed_requests
+        self.retry_after = retry_after
+        self.calls = 0
+
+    def check(self, *, identifier: str, route_key: str, limit: int, window_seconds: int, now: int | None = None):
+        self.calls += 1
+        allowed = self.calls <= self.allowed_requests
+        remaining = max(0, limit - self.calls)
+        retry = self.retry_after if not allowed else 0
+        return RateLimitResult(
+            allowed=allowed,
+            retry_after_seconds=retry,
+            limit=limit,
+            remaining=remaining,
+        )
 
 
 @pytest.mark.usefixtures("_stub_s3")
-def test_login_rate_limiting(monkeypatch, db_session):
+def test_ai_chat_rate_limit_returns_429(monkeypatch, client: TestClient):
     """
-    Enable SlowAPI rate limiting and ensure /auth/cognito/login returns 429 after exceeding limit.
+    Ensure the custom Dynamo-backed rate limiter enforces HTTP 429 responses on AI routes.
     """
-    import app.core.rate_limit as rate_limit
-    import app.routes.auth_cognito as auth_cognito
-    import app.main as main
 
-    try:
-        app_config.settings.ENABLE_RATE_LIMITING = True
+    limiter = _CountingLimiter(allowed_requests=2, retry_after=7)
+    rate_limiter_module._limiter = limiter  # type: ignore[attr-defined]
 
-        importlib.reload(rate_limit)
-        importlib.reload(auth_cognito)
-        importlib.reload(main)
+    fake_result = AIChatResult(
+        usage_id=1,
+        request_id="req",
+        response_id="resp",
+        response_text="ok",
+        model="gpt",
+        prompt_tokens=10,
+        completion_tokens=5,
+        total_tokens=15,
+        credits_used_cents=10,
+        credits_refunded_cents=0,
+        credits_reserved_cents=10,
+        balance_cents=100,
+    )
 
-        app = main.app
+    monkeypatch.setattr("app.routes.ai_chat.AIUsageOrchestrator.run_chat", lambda *args, **kwargs: fake_result)
+    monkeypatch.setattr("app.routes.ai_chat.AIUsageOrchestrator.estimate_reserved_credits", lambda *args, **kwargs: 1)
+    monkeypatch.setattr("app.services.credits.CreditsService.get_balance_cents", lambda self, user_id: 10_000)
 
-        def override_get_db():
-            yield db_session
+    payload = {
+        "request_id": "rate-test",
+        "messages": [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Say hi."},
+        ],
+    }
 
-        app.dependency_overrides[get_db] = override_get_db
+    first = client.post("/ai/chat", json=payload)
+    second = client.post("/ai/chat", json=payload)
+    third = client.post("/ai/chat", json=payload)
 
-        monkeypatch.setattr(
-            "app.routes.auth_cognito.cognito_initiate_auth",
-            lambda email, password: {
-                "AuthenticationResult": {
-                    "AccessToken": "ACCESS",
-                    "IdToken": "IDTOKEN",
-                    "RefreshToken": "REFRESH",
-                    "ExpiresIn": 3600,
-                    "TokenType": "Bearer",
-                }
-            },
-        )
-        monkeypatch.setattr(
-            "app.routes.auth_cognito.cognito_get_user",
-            lambda token: {"sub": "rluser", "email": "rl@example.com", "name": "Rate Limited User"},
-        )
-
-        with TestClient(app) as client:
-            statuses: list[int] = []
-            for _ in range(11):
-                resp = client.post(
-                    "/auth/cognito/login",
-                    json={"email": "rl@example.com", "password": "Password12345!"},
-                )
-                statuses.append(resp.status_code)
-
-            assert statuses[:10] == [200] * 10, statuses
-            assert statuses[10] == 429, statuses
-            detail = resp.json()
-            assert detail["error"] == "RATE_LIMITED"
-    finally:
-        app_config.settings.ENABLE_RATE_LIMITING = False
-        importlib.reload(rate_limit)
-        importlib.reload(auth_cognito)
-        importlib.reload(main)
-
-
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 429
+    assert third.headers.get("Retry-After") == "7"
+    body = third.json()
+    assert body["error"] == "RATE_LIMITED"
+    assert body["details"]["retry_after_seconds"] == 7

@@ -65,6 +65,11 @@ Keep it concise, factual, and employer-facing.
   - `/billing/stripe/webhook` validates the signature, inserts `stripe_events` (`status=pending`), runs the handler transactionally, writes to `credit_ledger` with pack/session metadata + `idempotency_key`, and updates status to `processed|skipped|failed`. Failures capture the error and return HTTP 500 so Stripe retries.
   - `/billing/me` exposes the balance + Stripe customer id + the latest ledger entries; `/billing/packs` surfaces the configured packs for the frontend. `/billing/credits/balance` now also reports lifetime grants/spend and an `as_of` timestamp.
   - `reserve_credits`/`finalize_charge`/`refund_reservation` form the enforcement layer: reserve rows (`entry_type=ai_reserve`) reduce the available balance immediately, finalize rewrites the ledger with `ai_release` + `ai_charge`, and refunds write `ai_refund`. Each step is idempotent via its own `idempotency_key`. `/ai/chat` tokenizes prompts with `tiktoken`, budgets `AI_COMPLETION_TOKENS_MAX` completion tokens, over-reserves with `AI_CREDITS_RESERVE_BUFFER_PCT`, then calls OpenAI and settles/refunds; `/ai/demo` remains the dev-only harness.
+- AI conversations:
+  - `ai_conversations` + `ai_messages` tables persist durable chat sessions (title, timestamps, per-message role/content/tokens/credits/model/request id). `ai_usage` rows now carry `conversation_id`, `message_id`, `idempotency_key`, and `response_id` for end-to-end traceability.
+  - API surface: `POST /ai/conversations` (optional first message), `GET /ai/conversations`, `GET /ai/conversations/{id}`, and `POST /ai/conversations/{id}/messages`. Ownership is enforced everywhere; the message endpoint is the only way credits are deducted.
+  - `AIConversationService` pulls the last `AI_MAX_CONTEXT_MESSAGES` from `ai_messages`, enforces `AI_MAX_INPUT_CHARS`, writes the new user message, calls `AIUsageOrchestrator`, persists the assistant reply, and updates `ai_usage`.
+- Guardrails: `AI_REQUESTS_PER_MINUTE`, `AI_MAX_CONCURRENT_REQUESTS`, `AI_MAX_CONTEXT_MESSAGES`, `AI_MAX_INPUT_CHARS`, `AI_COMPLETION_TOKENS_MAX`, and `AI_OPENAI_MAX_RETRIES` all live in `Settings` + `.env.example`. Concurrency still uses the in-process limiter, but request-level throttling now runs through DynamoDB (`jobapptracker-rate-limits`), keyed by `user:{id}`/`ip:{addr}` + `route:{key}:window:{seconds}` with TTL-based expiry. When actual OpenAI cost exceeds the reservation we finalize the reserved amount, attempt to spend the delta via `CreditsService.spend_credits`, and refund/return HTTP 402 if the user lacks funds—no silent absorption.
 
 ## What Is Working
 - Cognito signup → confirm → login → MFA setup/verify → authenticated app access.
@@ -103,6 +108,16 @@ Keep it concise, factual, and employer-facing.
 - Tailwind v4 note: `dark:` is configured to follow the `.dark` class via `@custom-variant` in `frontend-web/src/index.css` (not media-based).
 
 ## Recent Changes (High Signal)
+- DynamoDB rate limiter:
+  - Replaced the old SlowAPI/in-memory toggle with a shared limiter backed by `jobapptracker-rate-limits` (PK `pk=user:{id}|ip:{addr}`, SK `route:{key}:window:{seconds}`, TTL `expires_at`).
+  - Covers `/ai/*`, `/auth/cognito/*`, and document upload presigns so App Runner can scale horizontally without losing quotas. Exceeding the limit raises HTTP 429 with `Retry-After`.
+  - Env knobs: `RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, `RATE_LIMIT_DEFAULT_WINDOW_SECONDS`, `RATE_LIMIT_DEFAULT_MAX_REQUESTS`, `AI_RATE_LIMIT_WINDOW_SECONDS`, `AI_RATE_LIMIT_MAX_REQUESTS`. Disabled by default for local dev.
+- AI chat sessions (Phase A):
+  - Added `ai_conversations`/`ai_messages` tables, extended `ai_usage` with `conversation_id`/`message_id`/`response_id`/`idempotency_key`, and wired migrations/ORM models.
+  - Introduced `AIConversationService`, `app/services/limits.py`, and `app/services/ai_conversation.py` to orchestrate context trimming, reservations, OpenAI calls, and message persistence.
+  - New endpoints: `POST/GET /ai/conversations`, `GET /ai/conversations/{id}`, `POST /ai/conversations/{id}/messages`. Responses include recent messages, credit deltas, and remaining balance.
+  - Hardening: module-level rate/concurrency limiters + dependency seam, `AI_MAX_*` env vars, correlation ids (`X-Request-Id`), OpenAI retries with jitter, and safer settlement (charge delta only if balance allows, otherwise refund + HTTP 402).
+  - Tests cover orchestrator deltas/idempotency, rate/concurrency limiters, conversation routes (persistence + 402/429/503 paths), and schema docs were updated accordingly.
 - Stripe billing hardening:
   - Added `stripe_customer_id` linkage, `STRIPE_PRICE_MAP` parser, `/billing/packs`, and `/billing/me`.
   - Checkout now accepts only `pack_key`; metadata instructs the webhook how many credits to mint.

@@ -218,6 +218,37 @@ Key behaviors:
 5. Each step requires its own per-user `idempotency_key` (e.g., `chat-1::reserve`, `chat-1::finalize`). Retried HTTP requests reuse the same ledger entries, keeping the flow idempotent end-to-end.
 6. `POST /ai/chat` is the production entrypoint: it estimates cost, over-reserves, calls OpenAI, then finalizes/refunds based on actual usage. `POST /ai/demo` remains as a dev-only helper wired to the same helpers.
 
+### AI conversation (durable thread) flow
+
+1. `POST /ai/conversations` optionally accepts an initial `message`. Conversations live in `ai_conversations` keyed by `user_id`. If a message is provided the backend immediately creates the user-side `ai_messages` row before calling OpenAI so retries never drop user input.
+2. All message sends (`POST /ai/conversations/{id}/messages`) run through `AIConversationService`:
+   - Enforce `AI_MAX_INPUT_CHARS` and normalize whitespace.
+   - Load the last `AI_MAX_CONTEXT_MESSAGES` `ai_messages` rows for that conversation (oldest-first) and append the new user message to form the OpenAI payload.
+   - Attach/propagate a correlation id (`X-Request-Id` header if supplied, otherwise `uuid4`).
+3. Guardrails fire before OpenAI is invoked:
+   - The DynamoDB rate limiter enforces per-user/per-route budgets (`AI_RATE_LIMIT_MAX_REQUESTS` / `AI_RATE_LIMIT_WINDOW_SECONDS`). Because the table lives outside App Runner, limits hold even if multiple instances are running. Exceeding the budget raises HTTP 429 (with `Retry-After`) before we burn prepaid credits.
+   - `InMemoryConcurrencyLimiter` (`AI_MAX_CONCURRENT_REQUESTS`) still prevents overlapping OpenAI calls on the same instance. This guard lives in-process (cheap and instantaneous) and is fine being node-local because concurrency is inherently tied to the work queued on that specific container.
+4. `AIUsageOrchestrator.run_chat(...)` now accepts the conversation id + correlation id:
+   - Tokenizes with `tiktoken`, budgets `AI_COMPLETION_TOKENS_MAX` completion tokens, applies `AI_CREDITS_RESERVE_BUFFER_PCT`, and reserves credits (ledger `ai_reserve` row).
+   - Calls OpenAI with jittered retries (up to `AI_OPENAI_MAX_RETRIES`). Each call passes the correlation id so upstream logs are traceable.
+   - If actual cost ≤ reserved → finalize charge + refund the difference.
+   - If actual cost > reserved → finalize the reserved amount, attempt to `spend_credits` for the delta (`idempotency_key="{request_id}::delta"`), and refund/return HTTP 402 when the user lacks funds.
+   - Any OpenAI exception triggers `refund_reservation` and HTTP 503 so the client can retry.
+5. Successful runs persist the assistant message (`ai_messages`), update `ai_usage` with `conversation_id`/`message_id`/`response_id`, bump `ai_conversations.updated_at`, and return `{ user_message, assistant_message, credits_used_cents, credits_remaining_* }`.
+6. `GET /ai/conversations`/`GET /ai/conversations/{id}` page through `ai_conversations` + `ai_messages` (oldest-first). The frontend does not need to resend the entire transcript; it can resume from the last known message id.
+
+### Rate limiting (DynamoDB)
+
+1. For each protected route we call `require_rate_limit(route_key, limit, window_seconds)` before hitting business logic.
+2. The dependency inspects `request.state.user`. If authenticated it builds `pk=user:{user_id}`, otherwise `pk=ip:{client_ip}`. The sort key is `route:{route_key}:window:{window_seconds}`.
+3. `window_start = now - (now % window_seconds)` and `expires_at = window_start + window_seconds + ttl_buffer`.
+4. `DynamoRateLimiter.check(...)` issues a single `UpdateItem`:
+   - Condition: `attribute_not_exists(window_start) OR window_start = :window_start`
+   - Update: `window_start = :window_start`, `count = if_not_exists(count, 0) + 1`, `expires_at = :expires_at`
+   - On `ConditionalCheckFailedException` it resets the window with a second `UpdateItem` that sets `count = 1`.
+5. If the returned `count` is above the configured limit we compute `retry_after = max(1, window_start + window_seconds - now)` and raise HTTP 429 with `Retry-After`.
+6. DynamoDB’s TTL evicts items automatically, so App Runner can scale horizontally without sharing state through Redis/ElastiCache.
+
 ---
 
 ## Dev vs Prod Differences

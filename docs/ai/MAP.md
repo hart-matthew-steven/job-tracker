@@ -54,9 +54,12 @@ Update it whenever key entry points or folder structure changes.
   - Service helpers: `backend/app/services/stripe.py` (customer linking, pack/key checkout sessions, transactional webhook processing) and `backend/app/services/credits.py` (`get_balance_summary`, `reserve_credits`, `finalize_charge`, `refund_reservation`, `spend_credits`, formatting helpers).
   - Models: `backend/app/models/credit.py` (`credit_ledger`, `ai_usage`) and `backend/app/models/stripe_event.py` (`status`, `error_message`, `processed_at`).
 - AI usage:
-  - Client wrapper: `backend/app/services/openai_client.py` (OpenAI SDK wrapper, usage dataclasses).
-  - Orchestrator: `backend/app/services/ai_usage.py` (token estimation, over-reserve logic, settlement/refund, idempotency).
-  - Routes: `backend/app/routes/ai_chat.py` (production `/ai/chat`) and `backend/app/routes/ai_demo.py` (dev `/ai/demo` harness).
+  - Client wrapper: `backend/app/services/openai_client.py` (OpenAI SDK wrapper, retries, usage dataclasses).
+  - Orchestrator: `backend/app/services/ai_usage.py` (token estimation, buffered reservations, settlement/refund, idempotency, response caching).
+  - Conversations: `backend/app/services/ai_conversation.py`, `backend/app/services/limits.py`, and `backend/app/routes/ai_conversations.py` (`POST/GET /ai/conversations`, `GET /ai/conversations/{id}`, `POST /ai/conversations/{id}/messages`).
+  - Models: `backend/app/models/ai.py` (`AIConversation`, `AIMessage`) and `backend/app/models/credit.py` (`AIUsage` with conversation/message/idempotency fields).
+  - Routes: `/ai/chat` (`backend/app/routes/ai_chat.py`) remains the single-call endpoint; `/ai/demo` (`backend/app/routes/ai_demo.py`) is still the dev-only reservation harness.
+  - Rate limiting: `backend/app/services/rate_limiter.py` (factory/Noop), `backend/app/services/rate_limiter_dynamo.py` (DynamoDB implementation), and `backend/app/dependencies/rate_limit.py` (`require_rate_limit` dependency shared by `/ai/*`, `/auth/cognito/*`, and document presigns).
 - Deployment: README "Production deployment (AWS App Runner)" section documents the ECR/App Runner flow (buildx `linux/amd64`, Secrets Manager env injection, `api.jobapptracker.dev` endpoint).
 
 ## Architecture Docs

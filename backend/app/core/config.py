@@ -114,7 +114,13 @@ class Settings:
         # ----------------------------
         # Rate limiting / uploads / AWS
         # ----------------------------
-        self.ENABLE_RATE_LIMITING = str_to_bool(os.getenv("ENABLE_RATE_LIMITING", "false"))
+        legacy_rate_toggle = os.getenv("ENABLE_RATE_LIMITING", "false")
+        self.DDB_RATE_LIMIT_TABLE = os.getenv("DDB_RATE_LIMIT_TABLE", "jobapptracker-rate-limits").strip()
+        self.RATE_LIMIT_ENABLED = str_to_bool(os.getenv("RATE_LIMIT_ENABLED", legacy_rate_toggle))
+        self.RATE_LIMIT_DEFAULT_WINDOW_SECONDS = max(1, int(os.getenv("RATE_LIMIT_DEFAULT_WINDOW_SECONDS", "60")))
+        self.RATE_LIMIT_DEFAULT_MAX_REQUESTS = max(1, int(os.getenv("RATE_LIMIT_DEFAULT_MAX_REQUESTS", "60")))
+        self.AI_RATE_LIMIT_WINDOW_SECONDS = max(1, int(os.getenv("AI_RATE_LIMIT_WINDOW_SECONDS", "60")))
+        self.AI_RATE_LIMIT_MAX_REQUESTS = max(1, int(os.getenv("AI_RATE_LIMIT_MAX_REQUESTS", "10")))
         self.DOC_SCAN_SHARED_SECRET = os.getenv("DOC_SCAN_SHARED_SECRET", "")
 
         self.MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(5 * 1024 * 1024)))
@@ -140,7 +146,12 @@ class Settings:
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
         self.OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip() or "gpt-4.1-mini"
         self.AI_CREDITS_RESERVE_BUFFER_PCT = max(0, int(os.getenv("AI_CREDITS_RESERVE_BUFFER_PCT", "25")))
-        self.AI_COMPLETION_TOKENS_MAX = max(1, int(os.getenv("AI_COMPLETION_TOKENS_MAX", "800")))
+        self.AI_COMPLETION_TOKENS_MAX = max(1, int(os.getenv("AI_COMPLETION_TOKENS_MAX", "3000")))
+        self.AI_MAX_INPUT_CHARS = max(1, int(os.getenv("AI_MAX_INPUT_CHARS", "4000")))
+        self.AI_MAX_CONTEXT_MESSAGES = max(1, int(os.getenv("AI_MAX_CONTEXT_MESSAGES", "20")))
+        self.AI_REQUESTS_PER_MINUTE = max(1, int(os.getenv("AI_REQUESTS_PER_MINUTE", "5")))
+        self.AI_MAX_CONCURRENT_REQUESTS = max(1, int(os.getenv("AI_MAX_CONCURRENT_REQUESTS", "2")))
+        self.AI_OPENAI_MAX_RETRIES = max(1, int(os.getenv("AI_OPENAI_MAX_RETRIES", "3")))
 
         # Final: fail fast in prod
         self._validate_prod()

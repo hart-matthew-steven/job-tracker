@@ -23,7 +23,9 @@ class AiChatRequest(BaseModel):
 
 
 class AiChatResponse(BaseModel):
+    usage_id: int
     request_id: str
+    response_id: str
     model: str
     response_text: str
     prompt_tokens: int

@@ -48,6 +48,13 @@ Non-goals:
   - `finalize_charge(...)` first releases the hold (`ai_release`) then posts the actual cost (`ai_charge`). `refund_reservation(...)` instead writes `ai_refund` and marks the hold refunded. Every step has its own `idempotency_key`, so retries simply read the existing ledger entries.
   - If the balance would go negative we raise HTTP 402 and never touch the ledger. `/ai/chat` tokenizes prompts with `tiktoken`, budgets `AI_COMPLETION_TOKENS_MAX` completion tokens, applies the buffer (`AI_CREDITS_RESERVE_BUFFER_PCT`), and only then calls OpenAI, so paid work never starts unless funds are available.
 - The OpenAI orchestration layer estimates token usage, over-reserves with `AI_CREDITS_RESERVE_BUFFER_PCT`, calls `OpenAIClient`, then settles the reservation with the actual amount. If OpenAI returns more tokens than the reservation the entire hold is refunded, the response is discarded, and HTTP 500 is returned so the client can retry.
+- AI conversations are durable:
+  - `ai_conversations` table stores conversation metadata (`user_id`, `title`, timestamps). `ai_messages` stores both user and assistant turns plus optional token/credit metadata.
+  - `AIConversationService` trims history to `AI_MAX_CONTEXT_MESSAGES`, enforces `AI_MAX_INPUT_CHARS`, writes the user message, and delegates to `AIUsageOrchestrator`. Successful completions create the assistant message + `ai_usage` row (linked via `conversation_id`/`message_id`).
+  - New endpoints (`POST/GET /ai/conversations`, `GET /ai/conversations/{id}`, `POST /ai/conversations/{id}/messages`) expose the data. Responses include the latest messages, credits debited/refunded, and the remaining balance so the frontend never recalculates money locally.
+- Per-user guardrails live in `app/services/limits.py`: `AI_REQUESTS_PER_MINUTE` rate limiter + `AI_MAX_CONCURRENT_REQUESTS` concurrency limiter. Exceeding either returns HTTP 429 before credits are touched. OpenAI calls include correlation ids (`X-Request-Id` or generated) and jittered retries up to `AI_OPENAI_MAX_RETRIES`.
+- Request-level rate limiting (for `/auth/cognito/*`, `/ai/*`, and document upload presigns) is implemented via DynamoDB (`jobapptracker-rate-limits`). Each request increments `{pk=user:{id}|ip:{addr}, sk=route:{key}:window:{seconds}}` with TTL expiry so App Runner’s multiple instances share a consistent budget without running Redis/ElastiCache.
+  - Settlements handle overruns safely: if actual cost > reserved, we finalize the reserved amount and attempt to `spend_credits` for the delta. If the user lacks funds we refund the entire reservation and return HTTP 402—no negative balances or silent absorption.
 
 ### AWS (Production Infrastructure)
 The project assumes AWS-managed services are used for:

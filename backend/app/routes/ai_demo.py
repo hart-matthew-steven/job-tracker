@@ -3,13 +3,23 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
+from app.dependencies.rate_limit import require_rate_limit
 from app.models.user import User
 from app.schemas.billing import AiDemoRequest, AiDemoResponse, CreditLedgerEntryOut
 from app.services.credits import CreditsService, InsufficientCreditsError
 
 router = APIRouter(prefix="/ai", tags=["ai-demo"])
+
+ai_demo_rate_limit = Depends(
+    require_rate_limit(
+        route_key="ai_demo",
+        limit=settings.AI_RATE_LIMIT_MAX_REQUESTS,
+        window_seconds=settings.AI_RATE_LIMIT_WINDOW_SECONDS,
+    )
+)
 
 
 def _to_schema(entry) -> CreditLedgerEntryOut:
@@ -29,7 +39,7 @@ def _to_schema(entry) -> CreditLedgerEntryOut:
     )
 
 
-@router.post("/demo", response_model=AiDemoResponse)
+@router.post("/demo", response_model=AiDemoResponse, dependencies=[ai_demo_rate_limit])
 def simulate_ai_usage(
     payload: AiDemoRequest,
     db: Session = Depends(get_db),

@@ -21,7 +21,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AIChatResult:
+    usage_id: int
     request_id: str
+    response_id: str
     response_text: str
     model: str
     prompt_tokens: int
@@ -115,15 +117,33 @@ class AIUsageOrchestrator:
         user: User,
         messages: Sequence[ChatMessage],
         request_id: str | None = None,
+        conversation_id: int | None = None,
+        correlation_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> AIChatResult:
         request_key = request_id or str(uuid.uuid4())
-        usage_record = self._get_or_create_usage(user_id=user.id, request_id=request_key)
+        usage_record = self._get_or_create_usage(
+            user_id=user.id,
+            request_id=request_key,
+            conversation_id=conversation_id,
+            idempotency_key=idempotency_key or request_key,
+        )
 
         if usage_record.status == "succeeded":
-            logger.info("Returning cached AI usage result for request_id=%s", request_key)
+            logger.info(
+                "ai_chat.replay",
+                extra={
+                    "user_id": user.id,
+                    "request_id": request_key,
+                    "conversation_id": usage_record.conversation_id,
+                    "correlation_id": correlation_id,
+                },
+            )
             balance = self.credits.get_balance_cents(user.id)
             return AIChatResult(
+                usage_id=usage_record.id,
                 request_id=request_key,
+                response_id=usage_record.response_id or request_key,
                 response_text=usage_record.response_text or "",
                 model=usage_record.model,
                 prompt_tokens=usage_record.prompt_tokens,
@@ -149,6 +169,7 @@ class AIUsageOrchestrator:
         usage_record.reserved_cents = reserved_cents
         usage_record.status = "reserving"
         usage_record.error_message = None
+        usage_record.conversation_id = conversation_id
         self.db.flush()
 
         try:
@@ -157,6 +178,7 @@ class AIUsageOrchestrator:
                 amount_cents=reserved_cents,
                 idempotency_key=f"{request_key}::reserve",
                 description=f"AI chat reservation ({self.model})",
+                correlation_id=correlation_id,
             )
         except InsufficientCreditsError:
             usage_record.status = "failed"
@@ -165,7 +187,11 @@ class AIUsageOrchestrator:
             raise
 
         try:
-            response = self.client.chat_completion(messages=messages, request_id=request_key)
+            response = self.client.chat_completion(
+                messages=messages,
+                request_id=request_key,
+                max_tokens=self.max_completion_tokens,
+            )
         except OpenAIClientError as exc:
             logger.exception("OpenAI chat failed for request_id=%s", request_key)
             self.credits.refund_reservation(
@@ -191,47 +217,67 @@ class AIUsageOrchestrator:
         )
         usage_record.actual_cents = actual_cents
 
+        credits_refunded = 0
         if actual_cents > reserved_cents:
-            logger.error(
-                "Actual OpenAI cost exceeded reservation (request_id=%s reserved=%s actual=%s)",
-                request_key,
-                reserved_cents,
-                actual_cents,
-            )
-            self.credits.refund_reservation(
+            delta = actual_cents - reserved_cents
+            balance_after_hold = self.credits.get_balance_cents(user.id)
+            if balance_after_hold < delta:
+                logger.warning(
+                    "ai_chat.delta_insufficient",
+                    extra={
+                        "user_id": user.id,
+                        "conversation_id": conversation_id,
+                        "request_id": request_key,
+                        "reserved": reserved_cents,
+                        "actual": actual_cents,
+                        "correlation_id": correlation_id,
+                    },
+                )
+                self.credits.refund_reservation(
+                    reservation_id=reservation.reservation.id,
+                    user_id=user.id,
+                    idempotency_key=f"{request_key}::refund",
+                    reason="Actual usage exceeded reservation without funds",
+                )
+                usage_record.status = "failed"
+                usage_record.error_message = "Actual usage exceeded reservation without available credits."
+                usage_record.cost_cents = 0
+                self.db.commit()
+                raise InsufficientCreditsError("Insufficient credits to complete AI response.")
+
+            self.credits.finalize_charge(
                 reservation_id=reservation.reservation.id,
                 user_id=user.id,
-                idempotency_key=f"{request_key}::refund",
-                reason="Actual usage exceeded reservation",
+                actual_amount_cents=reserved_cents,
+                idempotency_key=f"{request_key}::finalize",
             )
-            usage_record.status = "failed"
-            usage_record.error_message = (
-                f"Actual credits {actual_cents} exceeded reserved credits {reserved_cents}"
+            self.credits.spend_credits(
+                user_id=user.id,
+                amount_cents=delta,
+                reason="ai usage delta",
+                idempotency_key=f"{request_key}::delta",
             )
-            usage_record.cost_cents = 0
-            self.db.commit()
-            raise AIUsageExceededReservationError(
-                reserved_cents=reserved_cents,
-                actual_cents=actual_cents,
-                request_id=request_key,
+        else:
+            self.credits.finalize_charge(
+                reservation_id=reservation.reservation.id,
+                user_id=user.id,
+                actual_amount_cents=actual_cents,
+                idempotency_key=f"{request_key}::finalize",
             )
+            credits_refunded = max(reserved_cents - actual_cents, 0)
 
-        self.credits.finalize_charge(
-            reservation_id=reservation.reservation.id,
-            user_id=user.id,
-            actual_amount_cents=actual_cents,
-            idempotency_key=f"{request_key}::finalize",
-        )
-
-        credits_refunded = max(reserved_cents - actual_cents, 0)
         usage_record.status = "succeeded"
         usage_record.cost_cents = actual_cents
         usage_record.error_message = None
+        usage_record.response_text = response.message
+        usage_record.response_id = response.response_id
         self.db.commit()
 
         balance = self.credits.get_balance_cents(user.id)
         return AIChatResult(
+            usage_id=usage_record.id,
             request_id=request_key,
+            response_id=response.response_id,
             response_text=response.message,
             model=response.model or self.model,
             prompt_tokens=response.usage.prompt_tokens,
@@ -243,16 +289,26 @@ class AIUsageOrchestrator:
             balance_cents=balance,
         )
 
-    def _get_or_create_usage(self, *, user_id: int, request_id: str) -> AIUsage:
+    def _get_or_create_usage(
+        self,
+        *,
+        user_id: int,
+        request_id: str,
+        conversation_id: int | None,
+        idempotency_key: str,
+    ) -> AIUsage:
         usage = (
             self.db.query(AIUsage)
             .filter(AIUsage.user_id == user_id, AIUsage.request_id == request_id)
             .first()
         )
         if usage:
+            if conversation_id and usage.conversation_id != conversation_id:
+                usage.conversation_id = conversation_id
             return usage
         usage = AIUsage(
             user_id=user_id,
+            conversation_id=conversation_id,
             feature="ai_chat",
             model=self.model,
             prompt_tokens=0,
@@ -260,6 +316,8 @@ class AIUsageOrchestrator:
             total_tokens=0,
             cost_cents=0,
             request_id=request_id,
+             response_id=None,
+            idempotency_key=idempotency_key,
             reserved_cents=0,
             actual_cents=0,
             status="pending",

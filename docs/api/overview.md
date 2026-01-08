@@ -83,6 +83,14 @@ For flow details, see:
 
 ---
 
+## Rate Limiting
+
+- Protected routes call `require_rate_limit(route_key, limit, window_seconds)` before hitting business logic. The limiter stores `{pk=user:{id}|ip:{addr}, sk=route:{key}:window:{seconds}}` in DynamoDB along with `window_start`, `count`, and a TTL (`expires_at`).
+- Exceeding the configured budget (e.g., `AI_RATE_LIMIT_MAX_REQUESTS` within `AI_RATE_LIMIT_WINDOW_SECONDS`) yields HTTP 429 and sets the `Retry-After` header. Per-IP fallback ensures anonymous callers are throttled even without Cognito identity.
+- Configuration knobs live in `.env.example` (`RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, default + AI-specific window/limit values). Local dev keeps the limiter disabled unless you explicitly enable it with AWS credentials.
+
+---
+
 ## Bundled responses
 
 To keep the SPA snappy on high-latency networks, some routes intentionally return multiple resource types at once. Key examples:

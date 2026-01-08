@@ -49,6 +49,18 @@ class AIUsage(Base):
         nullable=False,
         index=True,
     )
+    conversation_id = Column(
+        Integer,
+        ForeignKey("ai_conversations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    message_id = Column(
+        Integer,
+        ForeignKey("ai_messages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     feature = Column(String(100), nullable=False)
     model = Column(String(100), nullable=False)
     prompt_tokens = Column(Integer, nullable=False, server_default="0", default=0)
@@ -56,6 +68,8 @@ class AIUsage(Base):
     total_tokens = Column(Integer, nullable=False, server_default="0", default=0)
     cost_cents = Column(Integer, nullable=False)
     request_id = Column(String(255), nullable=True)
+    response_id = Column(String(255), nullable=True)
+    idempotency_key = Column(String(255), nullable=False)
     reserved_cents = Column(Integer, nullable=False, server_default="0", default=0)
     actual_cents = Column(Integer, nullable=False, server_default="0", default=0)
     status = Column(String(20), nullable=False, server_default="pending")
@@ -64,9 +78,12 @@ class AIUsage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
     user = relationship("User", backref="ai_usage_entries")
+    conversation = relationship("AIConversation", back_populates="usage_entries")
+    message = relationship("AIMessage", back_populates="usage")
 
     __table_args__ = (
         UniqueConstraint("user_id", "request_id", name="uq_ai_usage_user_request_id"),
+        UniqueConstraint("user_id", "idempotency_key", name="uq_ai_usage_user_idempotency"),
     )
 
 

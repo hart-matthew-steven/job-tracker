@@ -86,6 +86,15 @@
   - Hide jobs after N days (UI-only hiding; data stays in DB)
 
 ## Completed
+- DynamoDB rate limiter:
+  - Replaced the SlowAPI decorators with `require_rate_limit(...)` backed by `jobapptracker-rate-limits` (PK `pk=user:{id}|ip:{addr}`, SK `route:{key}:window:{seconds}`, TTL `expires_at`).
+  - Added env knobs `RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, `RATE_LIMIT_DEFAULT_WINDOW_SECONDS`, `RATE_LIMIT_DEFAULT_MAX_REQUESTS`, `AI_RATE_LIMIT_WINDOW_SECONDS`, `AI_RATE_LIMIT_MAX_REQUESTS`.
+  - Tests stub DynamoDB (window rollover, TTL, limit enforcement) and verify `/ai/chat` returns HTTP 429 + `Retry-After`.
+- AI conversations + guardrails:
+  - Added `ai_conversations`/`ai_messages` tables, extended `ai_usage`, and implemented `AIConversationService` plus the DynamoDB-backed rate limiter (`require_rate_limit(...)`) and the in-memory concurrency limiter for per-user fan-out control.
+  - New endpoints: `POST/GET /ai/conversations`, `GET /ai/conversations/{id}`, `POST /ai/conversations/{id}/messages`, each enforcing ownership, pagination, and prepaid credits.
+  - Config grew `AI_MAX_INPUT_CHARS`, `AI_MAX_CONTEXT_MESSAGES`, `AI_REQUESTS_PER_MINUTE`, `AI_MAX_CONCURRENT_REQUESTS`, `AI_OPENAI_MAX_RETRIES`, and OpenAI retries now include jittered backoff + correlation ids.
+  - Settlements charge the exact OpenAI cost: we finalize the reserved amount, bill any delta only if funds exist, otherwise refund and return HTTP 402. Tests exercise orchestrator delta handling, route behaviors (402/429/503), and limiter utilities.
 - Refactor frontend: split `frontend-web/src/App.tsx` (extract pages/components/hooks), add `src/routes/paths.ts`, and group job components under `src/components/jobs/`.
 - Consolidate backend user/settings responses (use dedicated settings schema for `/users/me/settings`)
 - Phase 2: dev reset script implemented: `temp_scripts/reset_dev_db.py` (guardrails, S3 cleanup, logs, `--yes`)

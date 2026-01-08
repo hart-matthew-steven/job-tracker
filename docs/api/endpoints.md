@@ -18,6 +18,13 @@ Guidelines:
 
 ---
 
+## Rate limiting
+
+- All `/ai/*`, `/auth/cognito/*`, and `/jobs/{id}/documents/presign-upload` endpoints are protected by a DynamoDB-backed fixed-window limiter. The table (`jobapptracker-rate-limits`) uses `pk=user:{user_id}` or `ip:{client_ip}` and `sk=route:{route_key}:window:{seconds}` to track counters with TTL (`expires_at`).
+- When the limiter fires, the API returns HTTP 429 with `{"error":"RATE_LIMITED","details":{"retry_after_seconds":N}}` and a `Retry-After` header. Tuning knobs live in `.env` (`RATE_LIMIT_ENABLED`, `RATE_LIMIT_DEFAULT_*`, `AI_RATE_LIMIT_*`).
+
+---
+
 ## Auth (`/auth/cognito/*`)
 
 - `POST /auth/cognito/signup`
@@ -150,7 +157,31 @@ Guidelines:
     }
     ```
   - Response: `{ "request_id": "chat-123", "model": "gpt-4.1-mini", "response_text": "...", "prompt_tokens": 900, "completion_tokens": 350, "credits_used_cents": 240, "credits_refunded_cents": 60, "credits_reserved_cents": 300, "credits_remaining_cents": 4700, "credits_remaining_dollars": "47.00" }`
-  - Notes: The backend tokenizes prompts with OpenAI’s tokenizer (`tiktoken`), budgets `AI_COMPLETION_TOKENS_MAX` completion tokens, applies `AI_CREDITS_RESERVE_BUFFER_PCT` (currently 25%), reserves *more* credits than needed, calls OpenAI, then finalizes the reservation with the actual cost. If the OpenAI response exceeds the reservation the entire reservation is refunded and the API returns HTTP 500 so the client can retry with a fresh request id. Passing the same `request_id` makes the call idempotent—success responses are replayed without hitting OpenAI again.
+  - Notes: The backend tokenizes prompts with OpenAI’s tokenizer (`tiktoken`), budgets `AI_COMPLETION_TOKENS_MAX` completion tokens, applies `AI_CREDITS_RESERVE_BUFFER_PCT` (currently 25%), reserves *more* credits than needed, calls OpenAI, then finalizes the reservation with the actual cost. If the OpenAI response exceeds the reservation the entire reservation is refunded and the API returns HTTP 500 so the client can retry with a fresh request id. Passing the same `request_id` makes the call idempotent—success responses are replayed without hitting OpenAI again. Exceeding `AI_RATE_LIMIT_MAX_REQUESTS` within `AI_RATE_LIMIT_WINDOW_SECONDS` returns HTTP 429 with a `Retry-After` header.
+
+### Conversations (`/ai/conversations*`)
+
+- `POST /ai/conversations`
+  - Auth: Bearer
+  - Body: `{ "title": "Resume polish", "message": "Review my resume summary" }` (message optional)
+  - Response: `ConversationDetailResponse` with the first page of messages.
+  - Notes: Creates a durable conversation row. If `message` is provided the backend sends it to OpenAI, stores both the user + assistant messages, and returns the new thread. DynamoDB rate limiting + in-process concurrency limits are enforced whenever a message is sent (HTTP 429 on overage).
+
+- `GET /ai/conversations?limit=20&offset=0`
+  - Auth: Bearer
+  - Response: `{ conversations: [{ id, title, message_count, created_at, updated_at }], next_offset }`
+  - Notes: Lists the caller’s conversations ordered by `updated_at desc`. Subject to the same rate limiter as other AI routes.
+
+- `GET /ai/conversations/{conversation_id}?limit=50&offset=0`
+  - Auth: Bearer
+  - Response: `ConversationDetailResponse` including paged messages (oldest-first).
+  - Notes: Rejects access to conversations owned by another user.
+
+- `POST /ai/conversations/{conversation_id}/messages`
+  - Auth: Bearer
+  - Body: `{ "content": "Draft a thank-you email" , "request_id": "msg-123" }`
+  - Response: `{ conversation_id, user_message, assistant_message, credits_used_cents, credits_reserved_cents, credits_remaining_* }`
+  - Notes: Appends a user message, builds a trimmed history (max `AI_MAX_CONTEXT_MESSAGES`), reserves credits, calls OpenAI, stores the assistant reply, and debits the final cost. Each `request_id` is idempotent. Returns 402 when the user lacks credits, 429 when the per-minute/concurrency guardrails fire, and 503 when OpenAI is temporarily unavailable.
 
 ---
 

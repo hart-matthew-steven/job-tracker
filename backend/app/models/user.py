@@ -52,3 +52,9 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+
+    ai_conversations = relationship(
+        "AIConversation",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )

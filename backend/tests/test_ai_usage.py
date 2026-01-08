@@ -4,10 +4,9 @@ from app.core import config as app_config
 from app.models.credit import AIUsage
 from app.services.ai_usage import (
     AIPricing,
-    AIUsageExceededReservationError,
     AIUsageOrchestrator,
 )
-from app.services.credits import CreditsService
+from app.services.credits import CreditsService, InsufficientCreditsError
 from app.services.openai_client import OpenAIChatResponse, OpenAIUsage
 
 
@@ -19,6 +18,7 @@ def _make_response(request_id: str, *, prompt_tokens: int, completion_tokens: in
     )
     return OpenAIChatResponse(
         request_id=request_id,
+        response_id=f"resp-{request_id}",
         model=app_config.settings.OPENAI_MODEL,
         message=text,
         usage=usage,
@@ -30,7 +30,7 @@ class _FakeOpenAIClient:
         self._responses = responses
         self.calls = 0
 
-    def chat_completion(self, *, messages, request_id: str):
+    def chat_completion(self, *, messages, request_id: str, max_tokens: int | None = None):
         response = self._responses[min(self.calls, len(self._responses) - 1)]
         self.calls += 1
         return response
@@ -86,6 +86,7 @@ def test_orchestrator_reserves_and_finalizes(db_session, users):
         completion_tokens=5_000,
     )
 
+    assert result.usage_id is not None
     assert result.credits_reserved_cents == expected_reserved
     assert result.credits_used_cents == actual_cost
     assert result.credits_refunded_cents == expected_reserved - actual_cost
@@ -130,13 +131,13 @@ def test_orchestrator_idempotent_on_success(db_session, users):
     assert fake_client.calls == 1
 
 
-def test_orchestrator_exceeds_reservation_refunds(db_session, users):
+def test_orchestrator_handles_large_actual_cost(db_session, users):
     user, _ = users
-    _seed_credits(db_session, user.id)
+    _seed_credits(db_session, user.id, amount=200_000)
 
     fake_client = _FakeOpenAIClient(
         [
-            _make_response("req-3", prompt_tokens=200_000, completion_tokens=80_000, text="too big"),
+            _make_response("req-3", prompt_tokens=5_000_000, completion_tokens=2_000_000, text="too big"),
         ]
     )
     orchestrator = AIUsageOrchestrator(
@@ -145,24 +146,13 @@ def test_orchestrator_exceeds_reservation_refunds(db_session, users):
         token_estimator=lambda messages: (10_000, 2_000),
     )
 
-    try:
-        orchestrator.run_chat(
-            user=user,
-            messages=[{"role": "user", "content": "large response please"}],
-            request_id="req-3",
-        )
-    except AIUsageExceededReservationError:
-        pass
-    else:  # pragma: no cover
-        raise AssertionError("Expected AIUsageExceededReservationError")
-
-    usage_row = (
-        db_session.query(AIUsage)
-        .filter(AIUsage.user_id == user.id, AIUsage.request_id == "req-3")
-        .one()
+    result = orchestrator.run_chat(
+        user=user,
+        messages=[{"role": "user", "content": "large response please"}],
+        request_id="req-3",
     )
-    assert usage_row.status == "failed"
-    assert "exceeded" in (usage_row.error_message or "")
+    assert result.credits_refunded_cents == 0
+    assert result.credits_used_cents >= result.credits_reserved_cents
 
 
 def test_default_estimator_uses_tokenizer(db_session):
@@ -187,4 +177,55 @@ def test_pricing_cost_from_tokens():
     pricing = AIPricing()
     cost = pricing.cost_from_tokens(model="gpt-4.1-mini", prompt_tokens=1_000_000, completion_tokens=0)
     assert cost == 15  # $0.15 * 100 credits
+
+
+def test_orchestrator_charges_delta_when_balance_allows(db_session, users):
+    user, _ = users
+    _seed_credits(db_session, user.id, amount=100_000)
+
+    fake_client = _FakeOpenAIClient(
+        [
+            _make_response("req-4", prompt_tokens=50_000, completion_tokens=20_000, text="delta ok"),
+        ]
+    )
+    orchestrator = AIUsageOrchestrator(
+        db_session,
+        openai_client=fake_client,
+        token_estimator=lambda messages: (10_000, 2_000),
+    )
+
+    result = orchestrator.run_chat(
+        user=user,
+        messages=[{"role": "user", "content": "Need long answer"}],
+        request_id="req-4",
+    )
+    assert result.credits_refunded_cents >= 0
+    assert fake_client.calls == 1
+
+
+def test_orchestrator_delta_fails_without_balance(db_session, users):
+    user, _ = users
+    _seed_credits(db_session, user.id, amount=200)
+
+    fake_client = _FakeOpenAIClient(
+        [
+            _make_response("req-5", prompt_tokens=10_000_000, completion_tokens=5_000_000, text="large"),
+        ]
+    )
+    orchestrator = AIUsageOrchestrator(
+        db_session,
+        openai_client=fake_client,
+        token_estimator=lambda messages: (1_000, 500),
+    )
+
+    try:
+        orchestrator.run_chat(
+            user=user,
+            messages=[{"role": "user", "content": "huge output"}],
+            request_id="req-5",
+        )
+    except InsufficientCreditsError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("Expected InsufficientCreditsError")
 

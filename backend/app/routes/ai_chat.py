@@ -6,11 +6,13 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
+from app.dependencies.rate_limit import require_rate_limit
 from app.models.user import User
 from app.schemas.ai import AiChatRequest, AiChatResponse
-from app.services.ai_usage import AIUsageExceededReservationError, AIUsageOrchestrator
+from app.services.ai_usage import AIUsageOrchestrator
 from app.services.credits import CreditsService, InsufficientCreditsError, format_cents_to_dollars
 from app.services.openai_client import OpenAIClientError
 
@@ -18,8 +20,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
+ai_chat_rate_limit = Depends(
+    require_rate_limit(
+        route_key="ai_chat",
+        limit=settings.AI_RATE_LIMIT_MAX_REQUESTS,
+        window_seconds=settings.AI_RATE_LIMIT_WINDOW_SECONDS,
+    )
+)
 
-@router.post("/chat", response_model=AiChatResponse)
+
+@router.post("/chat", response_model=AiChatResponse, dependencies=[ai_chat_rate_limit])
 def chat_completion(
     payload: AiChatRequest,
     db: Session = Depends(get_db),
@@ -39,12 +49,6 @@ def chat_completion(
         result = orchestrator.run_chat(user=user, messages=messages, request_id=request_id)
     except InsufficientCreditsError:
         raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient credits") from None
-    except AIUsageExceededReservationError as exc:
-        logger.error("AI usage exceeded reservation: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="OpenAI usage exceeded reserved credits; please retry shortly.",
-        ) from exc
     except OpenAIClientError as exc:
         logger.exception("OpenAI client error for request_id=%s", request_id)
         raise HTTPException(
@@ -53,7 +57,9 @@ def chat_completion(
         ) from exc
 
     return AiChatResponse(
+        usage_id=result.usage_id,
         request_id=result.request_id,
+        response_id=result.response_id,
         model=result.model,
         response_text=result.response_text,
         prompt_tokens=result.prompt_tokens,
