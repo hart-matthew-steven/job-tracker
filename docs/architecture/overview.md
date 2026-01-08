@@ -55,6 +55,10 @@ Non-goals:
 - Per-user guardrails live in `app/services/limits.py`: `AI_REQUESTS_PER_MINUTE` rate limiter + `AI_MAX_CONCURRENT_REQUESTS` concurrency limiter. Exceeding either returns HTTP 429 before credits are touched. OpenAI calls include correlation ids (`X-Request-Id` or generated) and jittered retries up to `AI_OPENAI_MAX_RETRIES`.
 - Request-level rate limiting (for `/auth/cognito/*`, `/ai/*`, and document upload presigns) is implemented via DynamoDB (`jobapptracker-rate-limits`). Each request increments `{pk=user:{id}|ip:{addr}, sk=route:{key}:window:{seconds}}` with TTL expiry so App Runner’s multiple instances share a consistent budget without running Redis/ElastiCache.
   - Settlements handle overruns safely: if actual cost > reserved, we finalize the reserved amount and attempt to `spend_credits` for the delta. If the user lacks funds we refund the entire reservation and return HTTP 402—no negative balances or silent absorption.
+- Operational controls:
+  - Every rate-limit decision emits a structured JSON log with `{user_id, route, method, limiter_key, window_seconds, limit, count, remaining, reset_epoch, decision}` so CloudWatch/Log Insights can slice by user, route, or limiter bucket without parsing free-form text.
+  - Admin-only tools hang off `/admin/rate-limits/*` and require `users.is_admin=true` (enforced by `require_admin_user`). Status/Reset/Override endpoints query or mutate the DynamoDB table directly and are the approved way to unblock a legitimate user without relaxing global settings.
+  - Overrides write a short-lived `sk=override:global` item with `{request_limit, window_seconds, expires_at}` which is checked before the standard route key. TTL (`expires_at`) is required, so temporary exceptions self-heal without manual cleanup.
 
 ### AWS (Production Infrastructure)
 The project assumes AWS-managed services are used for:

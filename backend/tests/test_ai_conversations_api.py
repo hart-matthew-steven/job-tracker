@@ -80,11 +80,19 @@ class _CountingLimiter:
         allowed = self.calls <= self.allowed_requests
         remaining = max(0, limit - self.calls)
         retry = self.retry_after if not allowed else 0
+        now_ts = int(now or 0)
+        window_start = now_ts - (now_ts % window_seconds) if window_seconds else now_ts
+        reset_epoch = window_start + (window_seconds or 0)
+        limiter_key = f"route:{route_key}:window:{window_seconds}"
         return RateLimitResult(
             allowed=allowed,
             retry_after_seconds=retry,
             limit=limit,
             remaining=remaining,
+            count=self.calls,
+            window_reset_epoch=reset_epoch,
+            limiter_key=limiter_key,
+            window_seconds=window_seconds,
         )
 
 

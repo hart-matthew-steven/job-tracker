@@ -241,13 +241,16 @@ Key behaviors:
 
 1. For each protected route we call `require_rate_limit(route_key, limit, window_seconds)` before hitting business logic.
 2. The dependency inspects `request.state.user`. If authenticated it builds `pk=user:{user_id}`, otherwise `pk=ip:{client_ip}`. The sort key is `route:{route_key}:window:{window_seconds}`.
-3. `window_start = now - (now % window_seconds)` and `expires_at = window_start + window_seconds + ttl_buffer`.
-4. `DynamoRateLimiter.check(...)` issues a single `UpdateItem`:
+3. Before incrementing a window we `GetItem` `sk=override:global`. If a non-expired override exists (short-lived TTL-backed record) we temporarily replace `limit`/`window_seconds` with the override’s values. Overrides are created via the admin API and expire automatically via the shared `expires_at` TTL field.
+4. `window_start = now - (now % window_seconds)` and `expires_at = window_start + window_seconds + ttl_buffer`.
+5. `DynamoRateLimiter.check(...)` issues a single `UpdateItem`:
    - Condition: `attribute_not_exists(window_start) OR window_start = :window_start`
-   - Update: `window_start = :window_start`, `count = if_not_exists(count, 0) + 1`, `expires_at = :expires_at`
+   - Update: `window_start = :window_start`, `count = if_not_exists(count, 0) + 1`, `expires_at = :expires_at`, plus metadata columns (`window_seconds`, `request_limit`, `route_key`, `item_type`) so downstream tooling can inspect active windows without custom parsing.
    - On `ConditionalCheckFailedException` it resets the window with a second `UpdateItem` that sets `count = 1`.
-5. If the returned `count` is above the configured limit we compute `retry_after = max(1, window_start + window_seconds - now)` and raise HTTP 429 with `Retry-After`.
-6. DynamoDB’s TTL evicts items automatically, so App Runner can scale horizontally without sharing state through Redis/ElastiCache.
+6. The dependency logs every decision as structured JSON `{user_id, route, http_method, limiter_key, window_seconds, limit, current_count, remaining, reset_epoch, decision}`. Log pipelines can answer “who is being throttled?” without scraping HTTP responses.
+7. If the returned `count` is above the configured limit we compute `retry_after = max(1, window_start + window_seconds - now)` and raise HTTP 429 with `Retry-After`.
+8. DynamoDB’s TTL (stored in `expires_at`) evicts counters and overrides automatically, so App Runner can scale horizontally without sharing state through Redis/ElastiCache.
+9. Admin-only endpoints (`/admin/rate-limits/status|reset|override`) require `users.is_admin=true` and provide safe knobs for support engineers. Status queries `Query` the table for a given `pk`, reset batch-deletes the keys, and override inserts a temporary `{pk=user:{id}, sk=override:global}` record that the limiter honors until TTL expiry.
 
 ---
 

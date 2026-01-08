@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Callable
 
@@ -29,6 +30,7 @@ def require_rate_limit(
             limit=resolved_limit,
             window_seconds=resolved_window,
         )
+        _log_decision(request=request, result=result, route_key=route_key)
         if not result.allowed:
             retry_after = max(1, result.retry_after_seconds)
             raise HTTPException(
@@ -56,4 +58,26 @@ def _resolve_identifier(request: Request) -> str:
     client = request.client
     host = (client.host if client else None) or "unknown"
     return f"ip:{host}"
+
+
+def _log_decision(*, request: Request, result: RateLimitResult, route_key: str) -> None:
+    user = getattr(request.state, "user", None)
+    user_id = getattr(user, "id", None)
+    payload = {
+        "user_id": user_id,
+        "route": request.url.path,
+        "http_method": request.method,
+        "route_key": route_key,
+        "limiter_key": result.limiter_key,
+        "window_seconds": result.window_seconds,
+        "limit": result.limit,
+        "current_count": result.count,
+        "remaining": result.remaining,
+        "reset_epoch": result.window_reset_epoch,
+        "decision": "allow" if result.allowed else "block",
+    }
+    try:
+        logger.info(json.dumps(payload, separators=(",", ":")))
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("Failed to emit rate limit log")
 

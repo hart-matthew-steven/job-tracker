@@ -25,6 +25,29 @@ Guidelines:
 
 ---
 
+## Admin / Operational
+
+> All admin endpoints require Cognito auth **and** `users.is_admin=true`. The reusable dependency `require_admin_user` enforces both.
+
+- `GET /admin/rate-limits/status?user_id=123`
+  - Auth: Bearer (admin only)
+  - Response: `{ "user_id": 123, "records": [{ "limiter_key": "route:ai_chat:window:60", "window_seconds": 60, "limit": 10, "count": 3, "remaining": 7, "expires_at": 1704752852, "record_type": "counter" }] }`
+  - Notes: Queries the DynamoDB limiter table for the given user (or IP if you substitute `user_id` with an internal IP-only identifier) and returns all active windows + overrides. Expired rows are filtered server-side so the UI only shows actionable data.
+
+- `POST /admin/rate-limits/reset`
+  - Auth: Bearer (admin only)
+  - Body: `{ "user_id": 123 }`
+  - Response: `{ "user_id": 123, "deleted": 4 }`
+  - Notes: Batch-deletes every limiter record (including overrides) for the user so the next request starts fresh. Safe to call multiple times; no rows are removed if the table has already expired naturally.
+
+- `POST /admin/rate-limits/override`
+  - Auth: Bearer (admin only)
+  - Body: `{ "user_id": 123, "limit": 50, "window_seconds": 60, "ttl_seconds": 900 }`
+  - Response: `{ "user_id": 123, "limit": 50, "window_seconds": 60, "expires_at": 1704753000 }`
+  - Notes: Writes `sk=override:global` with the provided limit/window and a required TTL. The limiter checks this record before incrementing route keys, so overrides apply to all protected endpoints for that user until the TTL expires or the admin calls `/reset`.
+
+---
+
 ## Auth (`/auth/cognito/*`)
 
 - `POST /auth/cognito/signup`

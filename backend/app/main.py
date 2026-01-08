@@ -20,6 +20,7 @@ from app.routes.billing import router as billing_router
 from app.routes.ai_demo import router as ai_demo_router
 from app.routes.ai_chat import router as ai_chat_router
 from app.routes.ai_conversations import router as ai_conversations_router
+from app.routes.admin_rate_limits import router as admin_rate_limits_router
 
 
 # -------------------------------------------------------------------
@@ -139,6 +140,7 @@ app.include_router(billing_router)
 app.include_router(ai_demo_router)
 app.include_router(ai_chat_router)
 app.include_router(ai_conversations_router)
+app.include_router(admin_rate_limits_router)
 
 
 # -------------------------------------------------------------------

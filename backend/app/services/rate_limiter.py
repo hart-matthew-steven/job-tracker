@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -18,6 +19,10 @@ class RateLimitResult:
     retry_after_seconds: int
     limit: int
     remaining: int
+    count: int
+    window_reset_epoch: int
+    limiter_key: str
+    window_seconds: int
 
 
 class RateLimiter(Protocol):
@@ -48,11 +53,18 @@ class NoopRateLimiter:
         window_seconds: int,
         now: int | None = None,
     ) -> RateLimitResult:
+        now_ts = int(now or time.time())
+        reset_epoch = now_ts + window_seconds
+        limiter_key = f"noop:{route_key}:window:{window_seconds}"
         return RateLimitResult(
             allowed=True,
             retry_after_seconds=0,
             limit=limit,
             remaining=max(0, limit),
+            count=0,
+            window_reset_epoch=reset_epoch,
+            limiter_key=limiter_key,
+            window_seconds=window_seconds,
         )
 
 

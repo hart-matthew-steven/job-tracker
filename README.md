@@ -192,6 +192,18 @@ After the image is pushed, point the App Runner service at the new ECR tag (or u
 - Configuration knobs (defaults are dev-friendly): `RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, `RATE_LIMIT_DEFAULT_WINDOW_SECONDS`, `RATE_LIMIT_DEFAULT_MAX_REQUESTS`, plus the AI-specific values `AI_RATE_LIMIT_WINDOW_SECONDS` / `AI_RATE_LIMIT_MAX_REQUESTS`.
 - Local development keeps the limiter disabled (`RATE_LIMIT_ENABLED=false`). To exercise it locally, set the env vars above and provide AWS credentials with DynamoDB access; otherwise the Noop limiter is used.
 
+#### Observability & admin controls
+
+- Every limiter decision emits a structured JSON log (`user_id`, `route`, `http_method`, `limiter_key`, `window_seconds`, `limit`, `count`, `remaining`, `reset_epoch`, `decision`). Use CloudWatch/Log Insights to answer “who is being throttled?” without scraping HTTP responses.
+- `/admin/rate-limits/status`, `/admin/rate-limits/reset`, and `/admin/rate-limits/override` are admin-only (Cognito + `users.is_admin=true`) and provide the sanctioned way to inspect or tweak limits for a single user. Overrides write `sk=override:global` with `{limit, window_seconds, ttl_seconds}` and expire automatically via Dynamo TTL.
+- Admins are created manually—there is no public promotion endpoint. Run:
+
+  ```sql
+  UPDATE users SET is_admin = true WHERE email = 'you@example.com';
+  ```
+
+  Grant access sparingly; everything is logged.
+
 ## Authentication (Cognito – Production Cutover)
 
 ### Architecture overview
