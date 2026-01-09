@@ -23,6 +23,7 @@ Keep it concise, factual, and employer-facing.
 - Profile + Change Password wired to backend APIs.
 - Landing page hero copy no longer references “private alpha” or Jira, and the “View demo board” CTA sends visitors to `/demo/board`, a read-only board preview rendered entirely in the browser so they can experience the kanban UX without signing in.
 - AppShell keeps the search affordance and “Create job” CTA visible in the header even on mobile breakpoints; the drawer is nav-only. This ensures primary actions stay one tap away regardless of screen size.
+- Billing loop: the AppShell header shows the current prepaid credit balance, `/billing` lists the three Stripe packs (Starter/Plus/Max) with frontend-controlled labels/badges, and `/billing/return` (plus the legacy `/billing/stripe/success|cancelled` paths) shows success/cancel outcomes and triggers a balance refresh after Stripe redirects back. Pack labels can be overridden via `VITE_BILLING_PACK_CONFIG` without changing backend `pack_key`s.
 - Settings page wired to backend:
   - Auto refresh frequency
   - Jobs default sort/view
@@ -82,6 +83,7 @@ Keep it concise, factual, and employer-facing.
 - Job activity timeline (notes/documents/status updates).
 - Job interviews CRUD in UI + backend.
 - Stripe prepaid credits: pack-based Checkout, webhook-driven credit grants, `/billing/me`/`/billing/credits/*` APIs, and webhook idempotency backed by `stripe_events`.
+- Credits badge + billing UI: the frontend now fetches `/billing/credits/balance` into a shared context, shows the balance in the AppShell header, exposes `/billing` for pack purchases (Starter/Plus/Max with frontend-controlled labels via `VITE_BILLING_PACK_CONFIG`), and adds `/billing/return` (plus aliases for the legacy `/billing/stripe/success|cancelled` paths) to display checkout success/cancel states and refresh balances after Stripe redirects back. Tests cover the badge, billing page, and return page flows.
 
 ## Partially Implemented / Deferred
 - Offer tracking (explicitly deferred / skipped for now).

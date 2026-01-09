@@ -29,7 +29,15 @@ npm run dev
 
 Optional: set `VITE_IDLE_TIMEOUT_MINUTES` to override the default 30-minute idle logout timer during local testing.
 
+Optional (billing UI): set `VITE_BILLING_PACK_CONFIG` to override the display labels/badges/descriptions for the credit packs without touching the backend `pack_key`s. Example:
+
+```bash
+VITE_BILLING_PACK_CONFIG='{"starter":{"label":"Starter"},"pro":{"label":"Plus","badge":"Most popular"},"expert":{"label":"Max","badge":"Best value"}}'
+```
+
 Note: `/demo/board` is a static preview that renders seeded data without calling the backend, so it works even if the API is offline. Use it when building marketing tweaks or debugging the landing CTA flow.
+
+Stripe checkout runs in test mode locally. Use the standard test card `4242 4242 4242 4242` with any future expiration, any CVC, and any ZIP to simulate a purchase and exercise `/billing` + `/billing/return`.
 
 ---
 

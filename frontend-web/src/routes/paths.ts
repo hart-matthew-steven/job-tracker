@@ -13,6 +13,10 @@ export const ROUTES = {
   board: "/board",
   jobs: "/jobs",
   insights: "/insights",
+  billing: "/billing",
+  billingReturn: "/billing/return",
+  billingReturnSuccessLegacy: "/billing/stripe/success",
+  billingReturnCanceledLegacy: "/billing/stripe/cancelled",
 
   // Account (protected)
   profile: "/profile",

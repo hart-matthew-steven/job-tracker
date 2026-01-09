@@ -123,7 +123,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         const res = await fetch(`${baseUrl}${path}`, {
             ...options,
             headers,
-            credentials: "omit",
+            credentials: "include",
         });
 
         if (res.status === 401) {

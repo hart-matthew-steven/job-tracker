@@ -124,6 +124,7 @@ export async function refreshSession(): Promise<AuthSession | null> {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: currentSession?.refreshToken }),
+        credentials: "include",
       });
 
       if (!res.ok) {

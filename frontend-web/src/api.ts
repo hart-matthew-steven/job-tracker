@@ -1,31 +1,34 @@
 // src/api.ts
 import type {
+  ActivityMetrics,
   AddNoteIn,
   ChangePasswordIn,
   ConfirmUploadIn,
+  CreateInterviewIn,
   CreateJobIn,
+  CreateSavedViewIn,
+  CreditPack,
+  CreditsBalance,
   DocumentItem,
   Job,
+  JobActivityPage,
+  JobDetailsBundle,
+  JobInterview,
+  JobsBoardResponse,
   MessageOut,
   Note,
+  PatchInterviewIn,
   PatchJobIn,
+  PatchSavedViewIn,
   PresignUploadIn,
   PresignUploadOut,
-  UpdateSettingsIn,
-  UserMeOut,
-  UserSettingsOut,
-  CreateSavedViewIn,
-  PatchSavedViewIn,
   SavedView,
-  JobActivityPage,
-  CreateInterviewIn,
-  JobInterview,
-  PatchInterviewIn,
+  StripeCheckoutSessionOut,
+  UpdateSettingsIn,
   UpdateUiPreferencesIn,
   UiPreferencesOut,
-  JobDetailsBundle,
-  JobsBoardResponse,
-  ActivityMetrics,
+  UserMeOut,
+  UserSettingsOut,
 } from "./types/api";
 
 import API_BASE from "./lib/apiBase";
@@ -52,6 +55,20 @@ export function subscribeToEmailVerificationRequired(listener: EmailVerification
   return () => emailVerificationListeners.delete(listener);
 }
 
+type ApiEvent = {
+  type: "rate-limit" | "server-error";
+  status: number;
+  message: string;
+};
+
+type ApiEventListener = (event: ApiEvent) => void;
+const apiEventListeners = new Set<ApiEventListener>();
+
+export function subscribeToApiEvents(listener: ApiEventListener): () => void {
+  apiEventListeners.add(listener);
+  return () => apiEventListeners.delete(listener);
+}
+
 function notifyUnauthorizedLogout() {
   logoutListeners.forEach((fn) => {
     try {
@@ -64,6 +81,32 @@ function notifyUnauthorizedLogout() {
 
 export function logout(): void {
   clearAuthSession();
+}
+
+function notifyApiEvent(event: ApiEvent) {
+  apiEventListeners.forEach((fn) => {
+    try {
+      fn(event);
+    } catch {
+      // ignore listener errors
+    }
+  });
+}
+
+function maybeEmitApiEvent(status: number, message: string) {
+  if (status === 429) {
+    notifyApiEvent({
+      type: "rate-limit",
+      status,
+      message: message || "You're moving quickly - please wait a moment and try again.",
+    });
+  } else if (status >= 500) {
+    notifyApiEvent({
+      type: "server-error",
+      status,
+      message: message || "Something went wrong on our side. Please try again shortly.",
+    });
+  }
 }
 
 function requiresAuth(path: string): boolean {
@@ -130,7 +173,7 @@ export async function requestJson<T = unknown>(path: string, options: JsonReques
     fetch(`${API_BASE}${path}`, {
       ...options,
       headers: hdrs,
-      credentials: "omit",
+      credentials: "include",
     });
 
   let res = await doFetch(baseHeaders);
@@ -155,6 +198,7 @@ export async function requestJson<T = unknown>(path: string, options: JsonReques
     }
 
     const { message, detail } = await parseError(res);
+    maybeEmitApiEvent(res.status, message);
     if (res.status === 403) {
       const payload = (typeof detail === "object" && detail !== null ? (detail as Record<string, unknown>) : {}) as {
         code?: string;
@@ -201,7 +245,7 @@ export async function requestVoid(path: string, options: JsonRequestOptions = {}
     fetch(`${API_BASE}${path}`, {
       ...options,
       headers: hdrs,
-      credentials: "omit",
+      credentials: "include",
     });
 
   let res = await doFetch(baseHeaders);
@@ -220,6 +264,7 @@ export async function requestVoid(path: string, options: JsonRequestOptions = {}
 
   if (!res.ok) {
     const { message, detail } = await parseError(res);
+    maybeEmitApiEvent(res.status, message);
     if (res.status === 403) {
       const payload = (typeof detail === "object" && detail !== null ? (detail as Record<string, unknown>) : {}) as {
         code?: string;
@@ -248,7 +293,7 @@ export async function requestVoid(path: string, options: JsonRequestOptions = {}
 export async function logoutUser(): Promise<void> {
   clearAuthSession();
   try {
-    await fetch(`${API_BASE}/auth/cognito/logout`, { method: "POST", credentials: "omit" });
+    await fetch(`${API_BASE}/auth/cognito/logout`, { method: "POST", credentials: "include" });
   } catch {
     // backend logout is best-effort
   }
@@ -505,4 +550,29 @@ export async function uploadToS3PresignedUrl(uploadUrl: string, file: File): Pro
     const text = await res.text().catch(() => "");
     throw new Error(text || `S3 upload failed: HTTP ${res.status} ${res.statusText}`);
   }
+}
+
+/** -------------------
+ * Billing / Credits
+ * ------------------- */
+export function getCreditsBalance(): Promise<CreditsBalance> {
+  return requestJson<CreditsBalance>(`/billing/credits/balance`);
+}
+
+export function listCreditPacks(): Promise<CreditPack[]> {
+  return requestJson<CreditPack[]>(`/billing/packs`);
+}
+
+export function createStripeCheckoutSession(packKey: string): Promise<StripeCheckoutSessionOut> {
+  const normalized = String(packKey ?? "")
+    .trim()
+    .toLowerCase();
+  if (!normalized) {
+    throw new Error("pack_key is required");
+  }
+  return requestJson<StripeCheckoutSessionOut>(`/billing/stripe/checkout`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pack_key: normalized }),
+  });
 }

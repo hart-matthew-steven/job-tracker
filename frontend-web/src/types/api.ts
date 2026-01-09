@@ -216,3 +216,29 @@ export type CreateInterviewIn = {
 
 export type PatchInterviewIn = Partial<CreateInterviewIn>;
 
+// -------- Billing / Credits --------
+export type CreditsBalance = {
+  currency: string;
+  balance_cents: number;
+  balance_dollars: string;
+  lifetime_granted_cents: number;
+  lifetime_spent_cents: number;
+  as_of: string;
+};
+
+export type CreditPack = {
+  key: string;
+  price_id: string;
+  credits: number;
+  currency: string;
+  display_price_dollars: string;
+};
+
+export type StripeCheckoutSessionOut = {
+  checkout_session_id: string;
+  checkout_url: string;
+  currency: string;
+  pack_key: string;
+  credits_granted: number;
+};
+
