@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session

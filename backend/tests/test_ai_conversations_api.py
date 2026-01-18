@@ -7,7 +7,6 @@ from app.main import app
 from app.routes import ai_conversations as ai_routes
 from app.routes.ai_conversations import (
     get_ai_concurrency_limiter,
-    get_ai_orchestrator,
 )
 from app.services import rate_limiter as rate_limiter_module
 from app.services.credits import CreditsService, format_cents_to_dollars

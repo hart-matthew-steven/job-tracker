@@ -191,7 +191,9 @@ describe("AIAssistantPage", () => {
     api.getAiConfig.mockResolvedValueOnce({ max_input_chars: 9000 });
     renderPage();
     const textarea = await screen.findByPlaceholderText(/Share job context/i);
-    expect((textarea as HTMLTextAreaElement).maxLength).toBe(9000);
+    await waitFor(() => {
+      expect((textarea as HTMLTextAreaElement).maxLength).toBe(9000);
+    });
   });
 
   it("lets users delete a conversation", async () => {

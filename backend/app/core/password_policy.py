@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, List
 
 from fastapi import HTTPException, status
@@ -9,7 +8,7 @@ from fastapi import HTTPException, status
 from app.core.config import settings
 
 if TYPE_CHECKING:
-    from app.models.user import User
+    pass
 
 COMMON_WEAK_PASSWORDS = {
     "password",

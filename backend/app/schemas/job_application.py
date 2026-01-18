@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Any
 from zoneinfo import ZoneInfo
 
 from app.schemas.job_application_note import NoteOut
-from app.schemas.job_activity import JobActivityOut, JobActivityPageOut
+from app.schemas.job_activity import JobActivityPageOut
 from app.schemas.job_interview import JobInterviewOut
 
 ET = ZoneInfo("America/New_York")

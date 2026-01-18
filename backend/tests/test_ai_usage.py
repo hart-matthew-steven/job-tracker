@@ -61,7 +61,8 @@ def test_orchestrator_reserves_and_finalizes(db_session, users):
             )
         ]
     )
-    estimator = lambda messages: (18_000, 4_000)
+    def estimator(messages):
+        return (18_000, 4_000)
     orchestrator = AIUsageOrchestrator(
         db_session,
         openai_client=fake_client,

@@ -3,12 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import asc, desc
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
-from app.models.job_application import JobApplication
 from app.models.job_interview import JobInterview
 from app.models.user import User
 from app.schemas.job_interview import JobInterviewCreate, JobInterviewOut, JobInterviewUpdate

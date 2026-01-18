@@ -12,7 +12,6 @@ from app.schemas.ai_artifact import (
     ArtifactPinRequest,
     ArtifactTextRequest,
     ArtifactStatus,
-    ArtifactType,
     ArtifactUploadRequest,
     ArtifactUploadResponse,
     ArtifactUrlRequest,

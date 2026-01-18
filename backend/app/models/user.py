@@ -4,7 +4,6 @@ from sqlalchemy import Boolean, Column, DateTime, Integer, String, func, JSON
 from sqlalchemy.orm import relationship
 
 from app.core.base import Base
-from app.models.artifact import AIArtifact
 
 
 class User(Base):

@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Callable
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import HTTPException, Request, status
 
 from app.core.config import settings
 from app.services.rate_limiter import RateLimitResult, get_rate_limiter

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
-import pytest
 
 from app.routes import admin_rate_limits as admin_routes
 from app.services.rate_limit_admin import RateLimitRecord

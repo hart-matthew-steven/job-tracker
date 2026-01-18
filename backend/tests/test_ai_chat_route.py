@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 
 from app.services.ai_usage import AIChatResult
 from app.services.credits import CreditsService

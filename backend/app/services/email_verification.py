@@ -5,7 +5,6 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings

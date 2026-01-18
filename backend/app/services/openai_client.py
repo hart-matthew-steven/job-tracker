@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 import time
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Sequence
 
 from openai import OpenAI, OpenAIError
 
