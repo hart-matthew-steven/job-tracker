@@ -8,6 +8,7 @@ import {
   listJobActivity,
   patchJob,
   createInterview,
+  patchInterview,
   deleteInterview,
 } from "../../api";
 import type { JobActivity, JobBoardCard, JobDetailsBundle } from "../../types/api";
@@ -27,11 +28,19 @@ type Props = {
 
 const ACTIVITY_PAGE_SIZE = 20;
 
+function normalizeTag(raw: unknown): string {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (!s) return "";
+  return s.length > 64 ? s.slice(0, 64) : s;
+}
+
 export function BoardDrawer({ jobId, onClose, onCardUpdate, onRefreshBoard, open }: Props) {
   const [bundle, setBundle] = useState<JobDetailsBundle | null>(null);
   const [loading, setLoading] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [tagText, setTagText] = useState("");
+  const [tagsBusy, setTagsBusy] = useState(false);
   const [activityItems, setActivityItems] = useState<JobActivity[]>([]);
   const [activityCursor, setActivityCursor] = useState<number | null>(null);
   const [activityLoadingMore, setActivityLoadingMore] = useState(false);
@@ -146,6 +155,18 @@ export function BoardDrawer({ jobId, onClose, onCardUpdate, onRefreshBoard, open
   const job = bundle?.job;
   const interviews = bundle?.interviews ?? [];
 
+  const tags = useMemo(() => {
+    if (!job) return [];
+    const raw = Array.isArray(job.tags) ? job.tags : [];
+    const out: string[] = [];
+    for (const t of raw) {
+      const s = normalizeTag(t);
+      if (!s) continue;
+      if (!out.includes(s)) out.push(s);
+    }
+    return out;
+  }, [job]);
+
   const refreshJobDetails = useCallback(async () => {
     if (!jobId) return;
     try {
@@ -214,6 +235,38 @@ export function BoardDrawer({ jobId, onClose, onCardUpdate, onRefreshBoard, open
       toast.error((err as Error).message || "Unable to update status");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleTagsChange(nextTags: string[]) {
+    if (!job || !jobId) return;
+    const cleaned: string[] = [];
+    for (const t of nextTags) {
+      const s = normalizeTag(t);
+      if (!s || cleaned.includes(s)) continue;
+      cleaned.push(s);
+    }
+    setTagsBusy(true);
+    const previousJob = job;
+    setBundle((prev) => (prev ? { ...prev, job: { ...prev.job, tags: cleaned } } : prev));
+    try {
+      const updated = await patchJob(jobId, { tags: cleaned });
+      setBundle((prev) => (prev ? { ...prev, job: { ...prev.job, ...updated } } : prev));
+      onCardUpdate({
+        id: updated.id,
+        tags: updated.tags ?? cleaned,
+        updated_at: updated.updated_at,
+        last_action_at: updated.last_action_at,
+        next_action_at: updated.next_action_at,
+        next_action_title: updated.next_action_title,
+      });
+      await loadActivityPage({ reset: true });
+      toast.success("Tags updated", "Board");
+    } catch (err) {
+      setBundle((prev) => (prev ? { ...prev, job: previousJob } : prev));
+      toast.error((err as Error).message || "Unable to update tags");
+    } finally {
+      setTagsBusy(false);
     }
   }
 
@@ -351,6 +404,26 @@ export function BoardDrawer({ jobId, onClose, onCardUpdate, onRefreshBoard, open
     }
   }
 
+  async function handleUpdateInterview(id: number, draft: InterviewDraft) {
+    if (!job) return;
+    try {
+      await patchInterview(job.id, id, {
+        scheduled_at: draft.scheduled_at,
+        stage: draft.stage || null,
+        kind: draft.kind || null,
+        location: draft.location || null,
+        interviewer: draft.interviewer || null,
+        status: draft.status || "scheduled",
+        notes: draft.notes || null,
+      });
+      toast.success("Interview updated", "Board drawer");
+      await refreshJobDetails();
+      await loadActivityPage({ reset: true });
+    } catch (err) {
+      toast.error((err as Error).message || "Unable to update interview");
+    }
+  }
+
   async function handleDeleteInterview(id: number) {
     if (!job) return;
     try {
@@ -372,6 +445,23 @@ export function BoardDrawer({ jobId, onClose, onCardUpdate, onRefreshBoard, open
   async function handleLoadMoreActivity() {
     if (!activityCursor || activityLoadingMore) return;
     await loadActivityPage({ cursor: activityCursor });
+  }
+
+  async function addTag() {
+    const next = normalizeTag(tagText);
+    if (!next || tagsBusy) return;
+    if (tags.includes(next)) {
+      setTagText("");
+      return;
+    }
+    await handleTagsChange([...tags, next]);
+    setTagText("");
+  }
+
+  async function removeTag(tag: string) {
+    if (tagsBusy) return;
+    const nextTags = tags.filter((t) => t !== tag);
+    await handleTagsChange(nextTags);
   }
 
   return (
@@ -438,7 +528,65 @@ export function BoardDrawer({ jobId, onClose, onCardUpdate, onRefreshBoard, open
             </div>
 
             <div className="rounded-2xl border border-slate-200 p-4 shadow-sm dark:border-slate-800">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tags</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {tags.length === 0 ? (
+                  <div className="text-xs text-slate-500">No tags yet.</div>
+                ) : (
+                  tags.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => removeTag(t)}
+                      disabled={tagsBusy}
+                      className={[
+                        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                        tagsBusy
+                          ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-500"
+                          : "cursor-pointer border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900",
+                      ].join(" ")}
+                      title="Remove tag"
+                    >
+                      <span className="truncate max-w-[12rem]">{t}</span>
+                      <span className="text-slate-400" aria-hidden="true">
+                        ✕
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <input
+                  value={tagText}
+                  onChange={(e) => setTagText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") addTag();
+                  }}
+                  disabled={tagsBusy}
+                  className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  placeholder="Add tag (e.g. referral, remote)"
+                />
+                <button
+                  type="button"
+                  onClick={addTag}
+                  disabled={tagsBusy}
+                  className={[
+                    "rounded-lg px-3 py-2 text-xs font-semibold transition border",
+                    tagsBusy
+                      ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-500"
+                      : "border-slate-200 bg-slate-900 text-white hover:bg-slate-800 dark:border-slate-700 dark:bg-slate-100 dark:text-slate-900",
+                  ].join(" ")}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 p-4 shadow-sm dark:border-slate-800">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Momentum mode</p>
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                Log quick touchpoints to update last action and set a follow-up reminder automatically.
+              </p>
               <div className="mt-3 grid gap-2 sm:grid-cols-3">
                 <button
                   type="button"
@@ -484,6 +632,9 @@ export function BoardDrawer({ jobId, onClose, onCardUpdate, onRefreshBoard, open
                   handleNextActionSave(data as FormData);
                 }}
               >
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Use next actions to set reminders. Cards marked as follow-ups show in the Follow-ups filter.
+                </p>
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Next action title</label>
                   <input
@@ -525,6 +676,7 @@ export function BoardDrawer({ jobId, onClose, onCardUpdate, onRefreshBoard, open
               loading={false}
               error=""
               onCreate={handleCreateInterview}
+              onUpdate={handleUpdateInterview}
               onDelete={handleDeleteInterview}
             />
 

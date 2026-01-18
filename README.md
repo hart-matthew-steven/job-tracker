@@ -181,6 +181,29 @@ docker buildx build \
 
 After the image is pushed, point the App Runner service at the new ECR tag (or update the service via IaC/console). App Runner pulls the image, injects environment variables from Secrets Manager, and exposes the service at the subdomain above.
 
+### Rate limiting (DynamoDB)
+
+- Request-level limits (for `/auth/cognito/*`, `/ai/*`, and document upload presigns) use the shared DynamoDB table `jobapptracker-rate-limits`.
+- Key design:
+  - `pk = user:{user_id}` for authenticated requests or `ip:{client_ip}` for anonymous callers.
+  - `sk = route:{route_key}:window:{window_seconds}`.
+  - Attributes: `window_start`, `count`, and `expires_at`. DynamoDB’s TTL evicts expired windows automatically so App Runner instances stay in sync without Redis/ElastiCache.
+- The FastAPI dependency `require_rate_limit(route_key, limit, window_seconds)` increments the counter via `UpdateItem` with a conditional expression. If the count exceeds the configured limit we raise HTTP 429 with a `Retry-After` header before touching business logic (or credits).
+- Configuration knobs (defaults are dev-friendly): `RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, `RATE_LIMIT_DEFAULT_WINDOW_SECONDS`, `RATE_LIMIT_DEFAULT_MAX_REQUESTS`, plus the AI-specific values `AI_RATE_LIMIT_WINDOW_SECONDS` / `AI_RATE_LIMIT_MAX_REQUESTS`.
+- Local development keeps the limiter disabled (`RATE_LIMIT_ENABLED=false`). To exercise it locally, set the env vars above and provide AWS credentials with DynamoDB access; otherwise the Noop limiter is used.
+
+#### Observability & admin controls
+
+- Every limiter decision emits a structured JSON log (`user_id`, `route`, `http_method`, `limiter_key`, `window_seconds`, `limit`, `count`, `remaining`, `reset_epoch`, `decision`). Use CloudWatch/Log Insights to answer “who is being throttled?” without scraping HTTP responses.
+- `/admin/rate-limits/status`, `/admin/rate-limits/reset`, and `/admin/rate-limits/override` are admin-only (Cognito + `users.is_admin=true`) and provide the sanctioned way to inspect or tweak limits for a single user. Overrides write `sk=override:global` with `{limit, window_seconds, ttl_seconds}` and expire automatically via Dynamo TTL.
+- Admins are created manually—there is no public promotion endpoint. Run:
+
+  ```sql
+  UPDATE users SET is_admin = true WHERE email = 'you@example.com';
+  ```
+
+  Grant access sparingly; everything is logged.
+
 ## Authentication (Cognito – Production Cutover)
 
 ### Architecture overview
@@ -208,7 +231,7 @@ After the image is pushed, point the App Runner service at the new ECR tag (or u
 - **Token storage**: access/id tokens remain in memory + `sessionStorage`. Refresh tokens are stored in `sessionStorage` only (never cookies). Documentation recommends CSP (`default-src 'self'; script-src 'self' 'strict-dynamic' ...`) and dependency hygiene to mitigate XSS.
 - **Authorization**: backend rejects any Bearer token that is not a Cognito access token signed with the expected key + `client_id`. Unknown `token_use` values are denied.
 - **Logging**: no access/refresh/id token values are logged. Structured logs record only result codes (OK/CHALLENGE/FAIL) and anonymized Cognito subjects.
-- **Rate limiting**: all `/auth/cognito/*` routes are decorated via SlowAPI. Enable `ENABLE_RATE_LIMITING=true` in prod and back the limiter with Redis/Elasticache.
+- **Rate limiting**: `/auth/cognito/*`, `/ai/*`, and document upload routes share a DynamoDB-backed limiter (`jobapptracker-rate-limits`). Each request increments `{pk=user:{id}|ip:{addr}, sk=route:{route_key}:window:{seconds}}` with a TTL-based expiry. Enable it in prod via `RATE_LIMIT_ENABLED=true`, `DDB_RATE_LIMIT_TABLE`, and `AWS_REGION`; local dev can leave it disabled to avoid AWS dependencies.
 - **CSRF**: there are no auth cookies. All requests are Bearer tokens via `Authorization` headers, which are not sent cross-site by browsers unless explicitly added.
 - **MFA**: required for every user. QR secrets are shown once and never logged/persisted server-side. Existing devices can re-enroll via `/auth/cognito/mfa/setup` with an access token if needed.
 - **CORS**: allow only the exact SPA origins in production (e.g., `https://jobapptracker.dev`). Local dev defaults (`http://localhost:5173`) are appended automatically when `ENV=dev`.
@@ -224,6 +247,30 @@ After the image is pushed, point the App Runner service at the new ECR tag (or u
   - Backend (`.env.example`): `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`.
   - Frontend: `VITE_TURNSTILE_SITE_KEY` (or `window.__TURNSTILE_SITE_KEY__` while prototyping).
 - Use Cloudflare’s public test keys for local dev (<https://developers.cloudflare.com/turnstile/get-started/>). Monitoring should alert on signup 4xx/5xx spikes in case CAPTCHA starts failing or abuse ramps up.
+
+## Rate Limiting (DynamoDB)
+
+- **Why DynamoDB?** App Runner services can scale horizontally at any time, so the old in-memory/SlowAPI limiter either had to run on a single instance or risk being bypassed. DynamoDB gives us per-item conditional updates, TTL expiry, and essentially zero maintenance without introducing Redis/ElastiCache.
+- **Table layout:** `pk=user:{user_id}` (or `ip:{remote_addr}` for unauthenticated requests), `sk=route:{route_key}:window:{seconds}`, attributes `window_start`, `count`, `expires_at` (used for TTL). Every request runs a single `UpdateItem`. If the `window_start` has changed, the limiter resets the counter and starts a new window.
+- **Config knobs:** `RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, `RATE_LIMIT_DEFAULT_WINDOW_SECONDS`, `RATE_LIMIT_DEFAULT_MAX_REQUESTS`, plus AI-specific knobs `AI_RATE_LIMIT_WINDOW_SECONDS`/`AI_RATE_LIMIT_MAX_REQUESTS`. Local `.env` leaves the limiter disabled by default; set those vars plus `AWS_REGION` to exercise it.
+- **Where it applies:** `/ai/chat`, `/ai/conversations*`, `/ai/demo`, `/auth/cognito/*`, and `/jobs/{id}/documents/presign-upload`. Rate-limited endpoints return HTTP 429 with a `Retry-After` header and `details.retry_after_seconds` payload.
+- **Manual test:**
+
+  ```bash
+  export RATE_LIMIT_ENABLED=true
+  export DDB_RATE_LIMIT_TABLE=jobapptracker-rate-limits
+  export AWS_REGION=us-east-1  # adjust as needed
+  ACCESS="Bearer $(cat /tmp/access_token)"
+  for i in {1..12}; do
+    curl -s -o /dev/null -w "%{http_code}\n" \
+      -H "Authorization: $ACCESS" \
+      -H "Content-Type: application/json" \
+      -d '{"request_id":"limit-test","messages":[{"role":"user","content":"hi"}]}' \
+      http://localhost:8000/ai/chat
+  done
+  ```
+
+  The first few calls return 200; subsequent ones return 429 with `Retry-After`.
 
 ### Local development flow
 
@@ -282,7 +329,7 @@ You’ll receive a new `access_token`/`id_token`. The SPA’s `tokenManager` doe
 
 - [ ] `COGNITO_REGION`, `COGNITO_USER_POOL_ID`, `COGNITO_APP_CLIENT_ID` present in App Runner/Secrets Manager.
 - [ ] CORS origins limited to `https://jobapptracker.dev` + `https://www.jobapptracker.dev`.
-- [ ] `ENABLE_RATE_LIMITING=true` with SlowAPI backed by Redis/Elasticache.
+- [ ] `RATE_LIMIT_ENABLED=true` with `DDB_RATE_LIMIT_TABLE` + IAM allowing `dynamodb:UpdateItem/DescribeTable` for the limiter table.
 - [ ] CloudFront (or ALB) configured with CSP/HSTS (`strict-transport-security: max-age=63072000; includeSubDomains; preload`).
 - [ ] Cognito App Client configured with `USER_PASSWORD_AUTH`, `REFRESH_TOKEN_AUTH`, and MFA = SOFTWARE_TOKEN_MFA (required).
 - [ ] Frontend built with `VITE_API_BASE_URL=https://api.jobapptracker.dev`.
@@ -292,6 +339,127 @@ You’ll receive a new `access_token`/`id_token`. The SPA’s `tokenManager` doe
 
 - Passkeys + native iOS flows (future chunk)
 - AI usage/billing gates (future chunk)
+
+### Stripe prepaid credits (Phase A)
+
+- Credits are sold in fixed packs configured via `STRIPE_PRICE_MAP` (`pack_key:price_id:credits`). The backend accepts only a `pack_key`, resolves the Stripe Price ID + credit quantity, and writes that metadata (`user_id`, `pack_key`, `credits_to_grant`, `environment`) into the Checkout Session and PaymentIntent so clients cannot spoof amounts.
+- Users are linked to Stripe Customers (`users.stripe_customer_id`). `GET /billing/credits/balance`/`GET /billing/me` return the current balance, lifetime grants/spend, Stripe customer id (if present), and the latest `credit_ledger` rows (with pack + Stripe ids). This is the UI/SDK-friendly surface for displaying "credits left".
+- `/billing/stripe/webhook` is the sole minting path. Every event is inserted into `stripe_events` with `status=pending` before any business logic runs; the handler verifies `checkout.session.completed` events are paid, uses the metadata to locate the user + pack, inserts a single ledger entry (`source=stripe`, `source_ref=stripe_event_id`, `pack_key`, `idempotency_key`), and updates `stripe_events.status` to `processed|skipped`. Failures mark the row `failed`, capture the error, and return HTTP 500 so Stripe retries.
+- Paid feature enforcement happens in two steps so flaky AI calls never double charge:
+  1. `reserve_credits(user_id, amount, idempotency_key)` locks the user row and inserts an `entry_type=ai_reserve` ledger row (negative amount, status `reserved`, correlation id). If there aren’t enough funds it raises `InsufficientCreditsError` and the API surfaces HTTP 402.
+  2. On success we either:
+     - `finalize_charge(reservation_id, actual_amount, idempotency_key)` → writes `ai_release` (+reserved amount) followed by `ai_charge` (−actual cost) so the ledger nets to the true spend; or
+     - `refund_reservation(reservation_id, idempotency_key)` → writes `ai_refund` (+reserved) and marks the hold as refunded.
+  Each call supplies a unique idempotency key, so retried requests reuse the existing rows instead of double spending.
+- `POST /ai/chat` applies the same primitives in production: we run the payload through OpenAI’s tokenizer (`tiktoken`) to count prompt tokens, budget `AI_COMPLETION_TOKENS_MAX` completion tokens, add the configured buffer (`AI_CREDITS_RESERVE_BUFFER_PCT`, default 25%), reserve that total, call OpenAI, then finalize/refund based on actual usage. If OpenAI returns more tokens than were reserved the hold is refunded automatically and the API responds with HTTP 500 so the client can retry safely (no silent overruns).
+- `POST /ai/demo` remains available for engineers when `ENABLE_BILLING_DEBUG_ENDPOINT=true` to exercise the reserve/finalize/refund flow without calling OpenAI.
+- Local test loop:
+
+```bash
+# 1. Start uvicorn /run backend and forward webhooks locally
+stripe login
+stripe listen --forward-to http://localhost:8000/billing/stripe/webhook
+
+# 2. Create a checkout session for a configured pack (e.g., "starter")
+ACCESS="Bearer $(cat /tmp/access_token)"   # or copy from SPA devtools
+curl -s -X POST http://localhost:8000/billing/stripe/checkout \
+  -H "Authorization: $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{"pack_key":"starter"}'
+# -> open checkout_url, use Stripe test card 4242-4242-4242-4242 (any CVC/ZIP)
+
+# 3. Confirm credits were granted
+curl -s -H "Authorization: $ACCESS" http://localhost:8000/billing/me | jq
+
+# 4. (Optional, non-prod only) burn credits via debug helper
+curl -s -X POST http://localhost:8000/billing/credits/debug/spend \
+  -H "Authorization: $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{"amount_cents":250,"reason":"dev test","idempotency_key":"debug-1"}'
+
+# 5. Exercise the reservation/finalize/refund flow without OpenAI
+curl -s -X POST http://localhost:8000/ai/demo \
+  -H "Authorization: $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{"idempotency_key":"demo-123","estimated_cost_credits":1200,"simulate_outcome":"success","actual_cost_credits":900}'
+
+# 6. Call the production AI chat endpoint (over-reserves + settles automatically)
+curl -s -X POST http://localhost:8000/ai/chat \
+  -H "Authorization: $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "request_id": "chat-1",
+        "messages": [
+          {"role": "system", "content": "You are a concise assistant."},
+          {"role": "user", "content": "Summarize my weekly wins."}
+        ]
+      }'
+```
+
+### AI conversations + guardrails
+
+- Durable storage lives in `ai_conversations` (per conversation) and `ai_messages` (per message). `ai_usage` rows now link back to both the conversation and the assistant message so every OpenAI call has a single usage/ledger footprint.
+- New endpoints:
+  - `POST /ai/conversations` – creates a conversation; optional `message` triggers an immediate completion.
+  - `GET /ai/conversations` – lists the authenticated user’s conversations (paged by `limit`/`offset`).
+  - `GET /ai/conversations/{id}` – returns metadata + paged messages (oldest-first).
+  - `POST /ai/conversations/{id}/messages` – appends a user message, runs the OpenAI workflow, persists the assistant reply, and returns `{user_message, assistant_message, credits_used_cents, credits_refunded_cents, credits_reserved_cents, credits_remaining_*}`.
+  - `PATCH /ai/conversations/{id}` – updates the conversation title (pass `null`/omit to clear it) and returns the refreshed thread metadata.
+- `GET /ai/config` – returns `{ "max_input_chars": AI_MAX_INPUT_CHARS }` so the SPA can size its textarea/counter dynamically whenever the backend budget changes.
+- `ai_messages.balance_remaining_cents` stores the user’s post-response balance so the SPA can show “Remaining credits” per assistant bubble alongside the existing token/charge metadata. Both `POST /ai/conversations` (when `message` is provided) and `POST /ai/conversations/{id}/messages` now accept an optional `purpose` (`cover_letter`, `thank_you`, `resume_tailoring`); the service injects the relevant system prompt without polluting the stored transcript.
+- Frontend entry point: `/ai-assistant` adds a primary nav item, renders the conversation list + chat thread full-screen, and uses the shared CreditsContext to disable the composer when the balance hits zero. The composer now defaults to “General chat” while keeping optional presets for cover letters / thank-you letters / resume tailoring. Each conversation card exposes an action menu (rename + delete) that works on desktop and mobile. HTTP 402 responses show a friendly banner with a “Buy credits” CTA that routes to `/billing`; `GET /ai/conversations*` history calls never spend credits.
+- Guardrails: per-user rate limiting (`AI_REQUESTS_PER_MINUTE`), concurrency limiting (`AI_MAX_CONCURRENT_REQUESTS`), context trimming (`AI_MAX_CONTEXT_MESSAGES`), max user input (`AI_MAX_INPUT_CHARS`), retry budget (`AI_OPENAI_MAX_RETRIES`), and a higher completion cap (`AI_COMPLETION_TOKENS_MAX=3000`). All are documented in `.env.example` and parsed in `app/core/config.py`.
+- Settlement logic now handles overruns safely: if actual cost exceeds the reservation we finalize the reserved amount, attempt to spend the delta via `CreditsService.spend_credits`, and refund/return HTTP 402 when the user lacks funds—no negative balances or silent absorption.
+- Example conversation loop (after seeding credits):
+
+```bash
+# Create a conversation with an initial prompt
+curl -s -X POST http://localhost:8000/ai/conversations \
+  -H "Authorization: $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Resume polish","message":"Review my summary"}' | jq
+
+# List conversations
+curl -s -H "Authorization: $ACCESS" http://localhost:8000/ai/conversations | jq
+
+# Fetch the latest messages (conversation id 42 shown here)
+curl -s -H "Authorization: $ACCESS" http://localhost:8000/ai/conversations/42?limit=20 | jq
+
+# Send another message within the same conversation
+curl -s -X POST http://localhost:8000/ai/conversations/42/messages \
+  -H "Authorization: $ACCESS" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"Draft a thank-you email for Acme"}' | jq
+```
+
+### AI artifacts & background processing
+
+- Resume / job-description context is managed through first-class “artifacts.” The backend exposes:
+  - `POST /ai/artifacts/upload-url` → presigned PUT for S3 + artifact placeholder
+  - `POST /ai/artifacts/{id}/complete-upload` → enqueues extraction (docx/pdf)
+  - `POST /ai/artifacts/text` → stores pasted resumes/JDs immediately
+  - `POST /ai/artifacts/url` → scrapes a JD webpage via readability + BeautifulSoup
+  - `POST /ai/artifacts/{id}/pin` → reuse an existing artifact in another conversation
+  - `GET /ai/artifacts/conversations/{id}` → current artifacts per role (resume, job_description, note) including status, version numbers, and presigned view URLs
+- Storage & queue configuration:
+  - `AI_ARTIFACTS_BUCKET` — dedicated S3 bucket for AI uploads
+  - `AI_ARTIFACTS_S3_PREFIX` — path prefix (default `users/`)
+  - `AI_ARTIFACTS_SQS_QUEUE_URL` — SQS queue consumed by the Celery worker
+  - `MAX_ARTIFACT_VERSIONS` — per-user retention cap (older uploads trimmed automatically)
+- Celery worker:
+  - Lives in the same repo (`app/celery_app.py`, tasks under `app/tasks/artifacts.py`)
+  - Broker is SQS (`broker_url=sqs://`, predefined queue = `artifact-tasks`)
+  - Tasks use `python-docx`, `pdfplumber`, `pypdfium2`, and `readability-lxml` to normalize text before saving it back to the artifact record.
+  - Local dev can run the worker with:
+
+    ```bash
+    cd backend
+    ./venv/bin/celery -A app.tasks.artifacts worker --loglevel=info
+    ```
+
+    (Set `AI_ARTIFACTS_SQS_QUEUE_URL` + AWS creds, or leave it empty to fall back to in-memory execution for smoke tests.)
+- App Runner deploys a **second service** for the worker (same image, command `celery -A app.tasks.artifacts worker --loglevel=info`). Give it the same IAM role permissions as the API (S3 read/write, SQS receive/delete).
+- Frontend artifacts panel consumes the `/ai/artifacts` endpoints to show the resume/JD currently “in context,” display processing states (Pending / Ready / Failed with reason), and offer “Upload / Paste / Link” affordances for both roles.
 
 ### CI/CD pipelines
 

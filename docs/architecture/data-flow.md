@@ -159,6 +159,101 @@ Reliability properties:
 
 ---
 
+## 5) Stripe credit purchase flow
+
+Text diagram:
+
+    Authenticated user
+      |
+      v
+    [FE] POST /billing/stripe/checkout (pack_key)
+      |
+      v
+    [API] StripeService.ensure_customer(user) ---> [Stripe Customer]
+      |
+      v
+    Resolve pack_key -> price_id + credits via STRIPE_PRICE_MAP
+      |
+      v
+    Stripe Checkout (hosted payment page with pack metadata)
+      |
+      v
+    Stripe Webhook --> /billing/stripe/webhook (signed)
+      |
+      v
+    StripeService.process_event(event_id)
+      |
+      +--> writes audit row to [DB] stripe_events (unique stripe_event_id, status=pending)
+      |
+      +--> when session.payment_status == paid:
+              CreditsService.apply_ledger_entry(
+                  source="stripe",
+                  source_ref=stripe_event_id,
+                  pack_key=metadata.pack_key,
+                  stripe_checkout_session_id=session.id,
+                  stripe_payment_intent_id=session.payment_intent,
+              )
+      |
+      +--> stripe_events.status updated to processed|skipped
+      |
+      v
+    credit_ledger (amount_cents == credits_to_grant) ---> available balance
+
+Key behaviors:
+- Credits are defined per pack (1 credit == 1 cent). `STRIPE_PRICE_MAP` holds `pack_key:price_id:credits`, so changing pack pricing is a config change rather than a code change.
+- Only the webhook can mint credits. Even if the checkout endpoint is spammed or the frontend drops, no credits are issued until Stripe proves the payment succeeded via a signed webhook and we’ve locked the relevant `stripe_events` row.
+- Idempotency lives in two layers:
+- `stripe_events.stripe_event_id` is unique, so re-delivered events are recorded once and marked `skipped`.
+- `credit_ledger` enforces `(user_id, idempotency_key)` uniqueness. Stripe deposits use `event_id-deposit`; future spends use their own `idempotency_key`. Even if a webhook or usage call retries, the ledger row is written at most once.
+- Spending is also ledger-driven: `spend_credits(user_id, amount, reason, idempotency_key)` locks the user row, recomputes the current balance, and inserts a negative ledger row only when the user has enough credits. If the balance is insufficient, the call fails with HTTP 402 and no rows are written.
+- Failures (missing metadata, DB errors, etc.) set `stripe_events.status=failed`, capture the error message, and return HTTP 500 so Stripe retries instead of silently losing the purchase.
+- Future AI usage charges will consume the credits that were minted here and log mirrored facts into `ai_usage` so USD costs remain explainable.
+
+### Credits reservation + OpenAI usage flow
+
+1. `reserve_credits` locks the user row (`SELECT ... FOR UPDATE`), verifies the live ledger balance, and writes an `ai_reserve` row (`amount_cents` negative, `status=reserved`, `correlation_id=uuid4`). This immediately reduces the available balance so concurrent AI requests cannot overspend.
+2. The API counts prompt tokens with OpenAI’s tokenizer (`tiktoken`) and budgets `AI_COMPLETION_TOKENS_MAX` completion tokens before applying the buffer (`AI_CREDITS_RESERVE_BUFFER_PCT`, 25 % today) so small spikes in usage never push the account negative.
+3. If the downstream OpenAI call succeeds, `finalize_charge` writes an `ai_release` row (+reserved amount) followed by an `ai_charge` row (−actual amount). The original `ai_reserve` row is marked `finalized`, so additional finalize attempts simply return the already-posted ledger entries.
+4. If the OpenAI request fails—or if actual usage exceeds the reservation—`refund_reservation` writes an `ai_refund` row (+reserved amount) and marks the reservation `refunded`. The API returns HTTP 500 so the client can retry with a new `request_id`.
+5. Each step requires its own per-user `idempotency_key` (e.g., `chat-1::reserve`, `chat-1::finalize`). Retried HTTP requests reuse the same ledger entries, keeping the flow idempotent end-to-end.
+6. `POST /ai/chat` is the production entrypoint: it estimates cost, over-reserves, calls OpenAI, then finalizes/refunds based on actual usage. `POST /ai/demo` remains as a dev-only helper wired to the same helpers.
+
+### AI conversation (durable thread) flow
+
+1. `POST /ai/conversations` optionally accepts an initial `message`. Conversations live in `ai_conversations` keyed by `user_id`. If a message is provided the backend immediately creates the user-side `ai_messages` row before calling OpenAI so retries never drop user input.
+2. All message sends (`POST /ai/conversations/{id}/messages`) run through `AIConversationService`:
+   - Enforce `AI_MAX_INPUT_CHARS` and normalize whitespace.
+   - Load the last `AI_MAX_CONTEXT_MESSAGES` `ai_messages` rows for that conversation (oldest-first) and append the new user message to form the OpenAI payload.
+   - Attach/propagate a correlation id (`X-Request-Id` header if supplied, otherwise `uuid4`).
+3. Guardrails fire before OpenAI is invoked:
+   - The DynamoDB rate limiter enforces per-user/per-route budgets (`AI_RATE_LIMIT_MAX_REQUESTS` / `AI_RATE_LIMIT_WINDOW_SECONDS`). Because the table lives outside App Runner, limits hold even if multiple instances are running. Exceeding the budget raises HTTP 429 (with `Retry-After`) before we burn prepaid credits.
+   - `InMemoryConcurrencyLimiter` (`AI_MAX_CONCURRENT_REQUESTS`) still prevents overlapping OpenAI calls on the same instance. This guard lives in-process (cheap and instantaneous) and is fine being node-local because concurrency is inherently tied to the work queued on that specific container.
+4. `AIUsageOrchestrator.run_chat(...)` now accepts the conversation id + correlation id:
+   - Tokenizes with `tiktoken`, budgets `AI_COMPLETION_TOKENS_MAX` completion tokens, applies `AI_CREDITS_RESERVE_BUFFER_PCT`, and reserves credits (ledger `ai_reserve` row).
+   - Calls OpenAI with jittered retries (up to `AI_OPENAI_MAX_RETRIES`). Each call passes the correlation id so upstream logs are traceable.
+   - If actual cost ≤ reserved → finalize charge + refund the difference.
+   - If actual cost > reserved → finalize the reserved amount, attempt to `spend_credits` for the delta (`idempotency_key="{request_id}::delta"`), and refund/return HTTP 402 when the user lacks funds.
+   - Any OpenAI exception triggers `refund_reservation` and HTTP 503 so the client can retry.
+5. Successful runs persist the assistant message (`ai_messages`), update `ai_usage` with `conversation_id`/`message_id`/`response_id`, bump `ai_conversations.updated_at`, and return `{ user_message, assistant_message, credits_used_cents, credits_remaining_* }`.
+6. `GET /ai/conversations`/`GET /ai/conversations/{id}` page through `ai_conversations` + `ai_messages` (oldest-first). The frontend does not need to resend the entire transcript; it can resume from the last known message id.
+
+### Rate limiting (DynamoDB)
+
+1. For each protected route we call `require_rate_limit(route_key, limit, window_seconds)` before hitting business logic.
+2. The dependency inspects `request.state.user`. If authenticated it builds `pk=user:{user_id}`, otherwise `pk=ip:{client_ip}`. The sort key is `route:{route_key}:window:{window_seconds}`.
+3. Before incrementing a window we `GetItem` `sk=override:global`. If a non-expired override exists (short-lived TTL-backed record) we temporarily replace `limit`/`window_seconds` with the override’s values. Overrides are created via the admin API and expire automatically via the shared `expires_at` TTL field.
+4. `window_start = now - (now % window_seconds)` and `expires_at = window_start + window_seconds + ttl_buffer`.
+5. `DynamoRateLimiter.check(...)` issues a single `UpdateItem`:
+   - Condition: `attribute_not_exists(window_start) OR window_start = :window_start`
+   - Update: `window_start = :window_start`, `count = if_not_exists(count, 0) + 1`, `expires_at = :expires_at`, plus metadata columns (`window_seconds`, `request_limit`, `route_key`, `item_type`) so downstream tooling can inspect active windows without custom parsing.
+   - On `ConditionalCheckFailedException` it resets the window with a second `UpdateItem` that sets `count = 1`.
+6. The dependency logs every decision as structured JSON `{user_id, route, http_method, limiter_key, window_seconds, limit, current_count, remaining, reset_epoch, decision}`. Log pipelines can answer “who is being throttled?” without scraping HTTP responses.
+7. If the returned `count` is above the configured limit we compute `retry_after = max(1, window_start + window_seconds - now)` and raise HTTP 429 with `Retry-After`.
+8. DynamoDB’s TTL (stored in `expires_at`) evicts counters and overrides automatically, so App Runner can scale horizontally without sharing state through Redis/ElastiCache.
+9. Admin-only endpoints (`/admin/rate-limits/status|reset|override`) require `users.is_admin=true` and provide safe knobs for support engineers. Status queries `Query` the table for a given `pk`, reset batch-deletes the keys, and override inserts a temporary `{pk=user:{id}, sk=override:global}` record that the limiter honors until TTL expiry.
+
+---
+
 ## Dev vs Prod Differences
 
 ### Development (ngrok)

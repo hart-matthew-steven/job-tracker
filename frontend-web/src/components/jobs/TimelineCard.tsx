@@ -26,6 +26,81 @@ function iconFor(type: string): string {
   return "•";
 }
 
+function formatActivityDetails(ev: JobActivity): string | null {
+  const data = ev.data;
+  if (!data || typeof data !== "object") return null;
+  const t = String(ev.type || "").toLowerCase();
+  const safeString = (value: unknown) => {
+    if (Array.isArray(value)) return value.filter(Boolean).join(", ");
+    if (value === null || value === undefined) return "";
+    return String(value);
+  };
+
+  if (t.includes("status")) {
+    const from = safeString(data.from);
+    const to = safeString(data.to);
+    if (from || to) return `From ${from || "—"} → ${to || "—"}`;
+  }
+
+  if (t.includes("tag")) {
+    const added = safeString(data.added);
+    const removed = safeString(data.removed);
+    if (added || removed) {
+      return [added ? `Added: ${added}` : null, removed ? `Removed: ${removed}` : null]
+        .filter(Boolean)
+        .join(" • ");
+    }
+  }
+
+  if (t.includes("document")) {
+    const filename = safeString(data.filename);
+    const docType = safeString(data.doc_type);
+    return [filename && `File: ${filename}`, docType && `Type: ${docType}`].filter(Boolean).join(" • ");
+  }
+
+  if (t.includes("interview")) {
+    const scheduledAt = safeString(data.scheduled_at);
+    const stage = safeString(data.stage);
+    const kind = safeString(data.kind);
+    const interviewer = safeString(data.interviewer);
+    const status = safeString(data.status);
+    const changes = data.changes && typeof data.changes === "object" ? (data.changes as Record<string, unknown>) : null;
+    const changeItems = changes
+      ? Object.entries(changes)
+          .map(([key, value]) => {
+            if (!value || typeof value !== "object") return "";
+            const v = value as { from?: unknown; to?: unknown };
+            const from = safeString(v.from);
+            const to = safeString(v.to);
+            const label = key.replace(/_/g, " ");
+            return from || to ? `${label}: ${from || "—"} → ${to || "—"}` : "";
+          })
+          .filter(Boolean)
+      : [];
+    const contextBits = [stage && `Stage: ${stage}`, kind && `Type: ${kind}`, interviewer && `Interviewer: ${interviewer}`, status && `Status: ${status}`]
+      .filter(Boolean)
+      .join(" • ");
+    return [
+      scheduledAt && `Scheduled: ${fmtDateTime(scheduledAt)}`,
+      contextBits,
+      changeItems.length ? changeItems.join(" • ") : "",
+    ]
+      .filter(Boolean)
+      .join(" • ");
+  }
+
+  if (t.includes("note")) {
+    return null;
+  }
+
+  const entries = Object.entries(data).map(([key, value]) => {
+    const v = safeString(value);
+    return v ? `${key}: ${v}` : "";
+  });
+  const fallback = entries.filter(Boolean).join(" • ");
+  return fallback || null;
+}
+
 type Props = {
   items: JobActivity[];
   loading?: boolean;
@@ -87,20 +162,22 @@ export default function TimelineCard({
           )}
 
           <div ref={listRef} className="mt-4 space-y-3 max-h-80 overflow-y-auto pr-1">
-            {items?.map((ev) => (
-              <div
-                key={ev.id}
-                className="rounded-lg border border-slate-800 bg-slate-950/30 px-4 py-3 flex items-start gap-3"
-              >
-                <div className="mt-0.5 text-slate-300 w-6 text-center">{iconFor(ev.type)}</div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm text-slate-100">
-                    {ev.message ?? ev.type}
+            {items?.map((ev) => {
+              const details = formatActivityDetails(ev);
+              return (
+                <div
+                  key={ev.id}
+                  className="rounded-lg border border-slate-800 bg-slate-950/30 px-4 py-3 flex items-start gap-3"
+                >
+                  <div className="mt-0.5 text-slate-300 w-6 text-center">{iconFor(ev.type)}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm text-slate-100">{ev.message ?? ev.type}</div>
+                    <div className="mt-1 text-xs text-slate-500">{fmtDateTime(ev.created_at)}</div>
+                    {details && <div className="mt-2 text-sm text-slate-200">{details}</div>}
                   </div>
-                  <div className="mt-1 text-xs text-slate-500">{fmtDateTime(ev.created_at)}</div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           {loadingMore && (
             <div className="mt-2 text-xs text-slate-400 text-center">Loading older activity…</div>

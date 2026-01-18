@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
@@ -9,7 +9,7 @@ from app.core.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.job_activity import JobActivity
 from app.models.user import User
-from app.schemas.job_activity import JobActivityOut, JobActivityPageOut, ActivityMetricsOut
+from app.schemas.job_activity import JobActivityPageOut, ActivityMetricsOut
 from app.services.jobs import get_job_for_user
 
 

@@ -51,6 +51,7 @@ ALLOWED_PREFIXES = (
     "GUARD_",
     "TURNSTILE_",
     "FRONTEND_",
+    "STRIPE_",
 )
 
 ALLOWED_EXACT = {"ENV"}
@@ -81,7 +82,18 @@ GROUPS: list[Group] = [
         "Amazon Cognito configuration.",
         ("COGNITO_REGION", "COGNITO_USER_POOL_ID", "COGNITO_APP_CLIENT_ID", "COGNITO_JWKS_CACHE_SECONDS"),
     ),
-    Group("Rate limiting", "SlowAPI rate limiting toggle.", ("ENABLE_RATE_LIMITING",)),
+    Group(
+        "Rate limiting",
+        "DynamoDB-backed limiter configuration.",
+        (
+            "DDB_RATE_LIMIT_TABLE",
+            "RATE_LIMIT_ENABLED",
+            "RATE_LIMIT_DEFAULT_WINDOW_SECONDS",
+            "RATE_LIMIT_DEFAULT_MAX_REQUESTS",
+            "AI_RATE_LIMIT_WINDOW_SECONDS",
+            "AI_RATE_LIMIT_MAX_REQUESTS",
+        ),
+    ),
     Group(
         "GuardDuty Malware Protection",
         "Feature flag for GuardDuty malware callbacks.",
@@ -106,6 +118,26 @@ GROUPS: list[Group] = [
             "RESEND_API_KEY",
             "RESEND_FROM_EMAIL",
             "FRONTEND_BASE_URL",
+        ),
+    ),
+    Group(
+        "Stripe",
+        "Stripe billing + webhook secrets.",
+        (
+            "STRIPE_SECRET_KEY",
+            "STRIPE_WEBHOOK_SECRET",
+            "STRIPE_DEFAULT_CURRENCY",
+            "STRIPE_PRICE_MAP",
+            "ENABLE_BILLING_DEBUG_ENDPOINT",
+            "OPENAI_API_KEY",
+            "OPENAI_MODEL",
+            "AI_CREDITS_RESERVE_BUFFER_PCT",
+            "AI_COMPLETION_TOKENS_MAX",
+            "AI_MAX_INPUT_CHARS",
+            "AI_MAX_CONTEXT_MESSAGES",
+            "AI_REQUESTS_PER_MINUTE",
+            "AI_MAX_CONCURRENT_REQUESTS",
+            "AI_OPENAI_MAX_RETRIES",
         ),
     ),
 ]

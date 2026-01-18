@@ -17,6 +17,7 @@ class User(Base):
 
     cognito_sub = Column(String(255), unique=True, index=True, nullable=False)
     auth_provider = Column(String(20), nullable=False, server_default="cognito")
+    stripe_customer_id = Column(String(255), unique=True, nullable=True)
 
     # --- User preferences ---
     # Jobs auto-refresh interval in seconds. 0 = off.
@@ -33,7 +34,8 @@ class User(Base):
     ui_preferences = Column(JSON, nullable=False, server_default="{}")
 
     # --- Status flags ---
-    is_active = Column(Boolean, nullable=False, server_default="true")
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    is_admin = Column(Boolean, nullable=False, server_default="false", default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     is_email_verified = Column(Boolean, nullable=False, server_default="false")
@@ -48,6 +50,17 @@ class User(Base):
 
     email_verification_codes = relationship(
         "EmailVerificationCode",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    ai_conversations = relationship(
+        "AIConversation",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    artifacts = relationship(
+        "AIArtifact",
         back_populates="user",
         cascade="all, delete-orphan",
     )

@@ -25,7 +25,6 @@ from app.schemas.auth_cognito import (
     CognitoTokens,
     EmailVerificationSendOut,
 )
-from app.core.rate_limit import limiter
 from app.services.cognito_client import (
     CognitoClientError,
     build_otpauth_uri,
@@ -39,6 +38,7 @@ from app.services.cognito_client import (
     cognito_sign_up,
     cognito_verify_software_token,
 )
+from app.dependencies.rate_limit import require_rate_limit
 from app.services.turnstile import (
     TurnstileConfigurationError,
     TurnstileVerificationError,
@@ -52,6 +52,27 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth/cognito", tags=["auth", "cognito"])
+
+
+def _auth_rate_limit(route_key: str, limit: int, window_seconds: int = 60):
+    return Depends(
+        require_rate_limit(
+            route_key=route_key,
+            limit=limit,
+            window_seconds=window_seconds,
+        )
+    )
+
+
+signup_rate_limit = _auth_rate_limit("auth_signup", 5)
+confirm_rate_limit = _auth_rate_limit("auth_confirm", 8)
+login_rate_limit = _auth_rate_limit("auth_login", 10)
+challenge_rate_limit = _auth_rate_limit("auth_challenge", 10)
+mfa_setup_rate_limit = _auth_rate_limit("auth_mfa_setup", 5)
+mfa_verify_rate_limit = _auth_rate_limit("auth_mfa_verify", 10)
+verification_send_rate_limit = _auth_rate_limit("auth_verification_send", 6)
+verification_confirm_rate_limit = _auth_rate_limit("auth_verification_confirm", 10)
+refresh_rate_limit = _auth_rate_limit("auth_refresh", 12)
 
 CHALLENGE_STEP_MAP = {
     "MFA_SETUP": "MFA_SETUP",
@@ -190,8 +211,7 @@ def _handle_auth_result(
     )
 
 
-@router.post("/signup", response_model=CognitoMessage)
-@limiter.limit("5/minute")
+@router.post("/signup", response_model=CognitoMessage, dependencies=[signup_rate_limit])
 def cognito_signup(
     request: Request,
     payload: CognitoSignupIn,
@@ -252,8 +272,7 @@ def cognito_signup(
     return CognitoMessage(status=status, message=message)
 
 
-@router.post("/confirm", response_model=CognitoMessage)
-@limiter.limit("8/minute")
+@router.post("/confirm", response_model=CognitoMessage, dependencies=[confirm_rate_limit])
 def cognito_confirm(request: Request, payload: CognitoConfirmIn):
     try:
         cognito_confirm_sign_up(payload.email, payload.code)
@@ -262,8 +281,7 @@ def cognito_confirm(request: Request, payload: CognitoConfirmIn):
     return CognitoMessage(status="OK", message="Account confirmed. You can now log in.")
 
 
-@router.post("/login", response_model=CognitoAuthResponse)
-@limiter.limit("10/minute")
+@router.post("/login", response_model=CognitoAuthResponse, dependencies=[login_rate_limit])
 def cognito_login(
     request: Request,
     payload: CognitoLoginIn,
@@ -283,8 +301,7 @@ def cognito_login(
     return _handle_auth_result(auth_result, db=db, fallback_email=payload.email)
 
 
-@router.post("/challenge", response_model=CognitoAuthResponse)
-@limiter.limit("10/minute")
+@router.post("/challenge", response_model=CognitoAuthResponse, dependencies=[challenge_rate_limit])
 def cognito_challenge(
     request: Request,
     payload: CognitoChallengeIn,
@@ -311,8 +328,7 @@ def cognito_challenge(
     return _handle_auth_result(challenge_result, db=db, fallback_email=payload.email)
 
 
-@router.post("/mfa/setup", response_model=CognitoSecretOut)
-@limiter.limit("5/minute")
+@router.post("/mfa/setup", response_model=CognitoSecretOut, dependencies=[mfa_setup_rate_limit])
 def cognito_mfa_setup(request: Request, payload: CognitoMfaSetupIn):
     try:
         assoc = cognito_associate_software_token(session=payload.session)
@@ -327,8 +343,7 @@ def cognito_mfa_setup(request: Request, payload: CognitoMfaSetupIn):
     return CognitoSecretOut(secret_code=secret, session=assoc.get("Session"), otpauth_uri=otpauth_uri)
 
 
-@router.post("/mfa/verify", response_model=CognitoAuthResponse)
-@limiter.limit("10/minute")
+@router.post("/mfa/verify", response_model=CognitoAuthResponse, dependencies=[mfa_verify_rate_limit])
 def cognito_mfa_verify(
     request: Request,
     payload: CognitoMfaVerifyIn,
@@ -363,8 +378,11 @@ def cognito_mfa_verify(
     )
 
 
-@router.post("/verification/send", response_model=EmailVerificationSendOut)
-@limiter.limit("6/minute")
+@router.post(
+    "/verification/send",
+    response_model=EmailVerificationSendOut,
+    dependencies=[verification_send_rate_limit],
+)
 def send_verification_code_route(
     request: Request,
     payload: EmailVerificationSendIn,
@@ -397,8 +415,11 @@ def send_verification_code_route(
     )
 
 
-@router.post("/verification/confirm", response_model=CognitoMessage)
-@limiter.limit("10/minute")
+@router.post(
+    "/verification/confirm",
+    response_model=CognitoMessage,
+    dependencies=[verification_confirm_rate_limit],
+)
 def confirm_verification_code(
     request: Request,
     payload: EmailVerificationConfirmIn,
@@ -444,8 +465,7 @@ def confirm_verification_code(
     )
 
 
-@router.post("/refresh", response_model=CognitoAuthResponse)
-@limiter.limit("12/minute")
+@router.post("/refresh", response_model=CognitoAuthResponse, dependencies=[refresh_rate_limit])
 def cognito_refresh(
     request: Request,
     payload: CognitoRefreshIn,

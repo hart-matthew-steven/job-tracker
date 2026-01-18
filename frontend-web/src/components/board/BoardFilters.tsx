@@ -27,6 +27,9 @@ export function BoardFilters({ followUpsOnly, onToggleFollowUps }: Props) {
                     Follow-ups
                 </button>
             </div>
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                Shows roles flagged for follow-up. Set reminders from the job drawer (next action or momentum actions).
+            </p>
         </section>
     );
 }

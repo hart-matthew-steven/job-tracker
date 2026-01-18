@@ -36,6 +36,30 @@ Non-goals:
 - Integrates with AWS services for storage and background processing
 - Coordinates file upload validation and anti-malware scanning
 
+### Billing & AI Credits (Stripe + OpenAI)
+- The backend keeps prepaid “AI Credits” in two tables: `credit_ledger` (balances) and `ai_usage` (per-request audit trail). The DB is the source of truth; Stripe merely funds balances and OpenAI never bills us directly.
+- Credit balances are stored as integer cents (1 USD = 100 credits). Doing all math in integers prevents float rounding drift and keeps idempotent reconciliations predictable when real money is involved.
+- Every ledger row records `source` (`stripe`, `admin`, `promo`, `usage`, etc.) plus an optional `source_ref`. `(user_id, source_ref)` and `(user_id, idempotency_key)` are unique so Stripe webhooks, admin tooling, and AI usage can retry safely without double-crediting.
+- Stripe Checkout is the only way to purchase credits. Users are linked to Stripe customers (`users.stripe_customer_id`), and every purchase references a configured pack (`STRIPE_PRICE_MAP=pack:price_id:credits`). The backend accepts only a `pack_key`, resolves the Stripe price + credit quantity, and writes that metadata into the Checkout session so the webhook can’t be spoofed.
+- Every webhook payload is written to `stripe_events` before any balance mutation. We track `status` (`pending`, `processed`, `skipped`, `failed`), the raw payload, and error text for observability/idempotency. A rerun that hits the `stripe_event_id` unique constraint simply returns `200 OK` without touching balances.
+- Credits are minted exclusively by signed `checkout.session.completed` events where `payment_status=paid`. The handler runs inside a transaction: insert `stripe_events` → mint `credit_ledger` entry (with `pack_key`, checkout/payment intent ids, per-user `idempotency_key`) → mark status `processed|skipped`. Any exception sets `status=failed`, stores the error, and returns HTTP 500 so Stripe retries.
+- Spending/reservations:
+  - `reserve_credits(...)` inserts `entry_type=ai_reserve` rows (status `reserved`, correlation id) after locking the user row. This immediately reduces the available balance so overlapping AI requests cannot double spend.
+  - `finalize_charge(...)` first releases the hold (`ai_release`) then posts the actual cost (`ai_charge`). `refund_reservation(...)` instead writes `ai_refund` and marks the hold refunded. Every step has its own `idempotency_key`, so retries simply read the existing ledger entries.
+  - If the balance would go negative we raise HTTP 402 and never touch the ledger. `/ai/chat` tokenizes prompts with `tiktoken`, budgets `AI_COMPLETION_TOKENS_MAX` completion tokens, applies the buffer (`AI_CREDITS_RESERVE_BUFFER_PCT`), and only then calls OpenAI, so paid work never starts unless funds are available.
+- The OpenAI orchestration layer estimates token usage, over-reserves with `AI_CREDITS_RESERVE_BUFFER_PCT`, calls `OpenAIClient`, then settles the reservation with the actual amount. If OpenAI returns more tokens than the reservation the entire hold is refunded, the response is discarded, and HTTP 500 is returned so the client can retry.
+- AI conversations are durable:
+  - `ai_conversations` table stores conversation metadata (`user_id`, `title`, timestamps). `ai_messages` stores both user and assistant turns plus optional token/credit metadata.
+  - `AIConversationService` trims history to `AI_MAX_CONTEXT_MESSAGES`, enforces `AI_MAX_INPUT_CHARS`, writes the user message, and delegates to `AIUsageOrchestrator`. Successful completions create the assistant message + `ai_usage` row (linked via `conversation_id`/`message_id`).
+  - New endpoints (`POST/GET /ai/conversations`, `GET /ai/conversations/{id}`, `POST /ai/conversations/{id}/messages`) expose the data. Responses include the latest messages, credits debited/refunded, and the remaining balance so the frontend never recalculates money locally.
+- Per-user guardrails live in `app/services/limits.py`: `AI_REQUESTS_PER_MINUTE` rate limiter + `AI_MAX_CONCURRENT_REQUESTS` concurrency limiter. Exceeding either returns HTTP 429 before credits are touched. OpenAI calls include correlation ids (`X-Request-Id` or generated) and jittered retries up to `AI_OPENAI_MAX_RETRIES`.
+- Request-level rate limiting (for `/auth/cognito/*`, `/ai/*`, and document upload presigns) is implemented via DynamoDB (`jobapptracker-rate-limits`). Each request increments `{pk=user:{id}|ip:{addr}, sk=route:{key}:window:{seconds}}` with TTL expiry so App Runner’s multiple instances share a consistent budget without running Redis/ElastiCache.
+  - Settlements handle overruns safely: if actual cost > reserved, we finalize the reserved amount and attempt to `spend_credits` for the delta. If the user lacks funds we refund the entire reservation and return HTTP 402—no negative balances or silent absorption.
+- Operational controls:
+  - Every rate-limit decision emits a structured JSON log with `{user_id, route, method, limiter_key, window_seconds, limit, count, remaining, reset_epoch, decision}` so CloudWatch/Log Insights can slice by user, route, or limiter bucket without parsing free-form text.
+  - Admin-only tools hang off `/admin/rate-limits/*` and require `users.is_admin=true` (enforced by `require_admin_user`). Status/Reset/Override endpoints query or mutate the DynamoDB table directly and are the approved way to unblock a legitimate user without relaxing global settings.
+  - Overrides write a short-lived `sk=override:global` item with `{request_limit, window_seconds, expires_at}` which is checked before the standard route key. TTL (`expires_at`) is required, so temporary exceptions self-heal without manual cleanup.
+
 ### AWS (Production Infrastructure)
 The project assumes AWS-managed services are used for:
 - Storage (e.g., uploads, generated artifacts)

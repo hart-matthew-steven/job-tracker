@@ -31,6 +31,13 @@ def get_user_by_email(db: Session, email: str) -> Optional[User]:
     return db.query(User).filter(User.email == email.strip().lower()).first()
 
 
+def get_user_by_stripe_customer_id(db: Session, customer_id: str) -> Optional[User]:
+    """Look up a user by their linked Stripe customer id."""
+    if not customer_id:
+        return None
+    return db.query(User).filter(User.stripe_customer_id == customer_id).first()
+
+
 def provision_cognito_user(
     db: Session,
     cognito_sub: str,

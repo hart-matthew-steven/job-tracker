@@ -5,6 +5,9 @@ import { useEffect } from "react";
 import DashboardPage from "./pages/DashboardPage";
 import JobsPage from "./pages/JobsPage";
 import BoardPage from "./pages/BoardPage";
+import BillingPage from "./pages/billing/BillingPage";
+import BillingReturnPage from "./pages/billing/BillingReturnPage";
+import AIAssistantPage from "./pages/ai/AIAssistantPage";
 
 import { useAuth } from "./auth/AuthProvider";
 import { subscribeToEmailVerificationRequired } from "./api";
@@ -19,6 +22,7 @@ import MfaSetupPage from "./pages/auth/MfaSetupPage";
 import MfaChallengePage from "./pages/auth/MfaChallengePage";
 
 import AppShell from "./components/layout/AppShell";
+import ApiEventListener from "./components/layout/ApiEventListener";
 import { ChangePasswordPage, ProfilePage, SettingsPage } from "./pages/account";
 import { ROUTES } from "./routes/paths";
 import LandingPage from "./pages/landing/LandingPage";
@@ -50,6 +54,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <EmailVerificationListener />
+      <ApiEventListener />
       <Routes>
         <Route path={ROUTES.home} element={<LandingPage />} />
         <Route path={ROUTES.demoBoard} element={<DemoBoardPage />} />
@@ -83,6 +88,11 @@ export default function App() {
           <Route path={ROUTES.board} element={<BoardPage />} />
           <Route path={ROUTES.jobs} element={<JobsPage />} />
           <Route path={ROUTES.insights} element={<DashboardPage />} />
+          <Route path={ROUTES.aiAssistant} element={<AIAssistantPage />} />
+          <Route path={ROUTES.billing} element={<BillingPage />} />
+          <Route path={ROUTES.billingReturn} element={<BillingReturnPage />} />
+          <Route path={ROUTES.billingReturnSuccessLegacy} element={<BillingReturnPage />} />
+          <Route path={ROUTES.billingReturnCanceledLegacy} element={<BillingReturnPage />} />
           <Route path={ROUTES.profile} element={<ProfilePage />} />
           <Route path={ROUTES.settings} element={<SettingsPage />} />
           <Route path={ROUTES.changePassword} element={<ChangePasswordPage />} />

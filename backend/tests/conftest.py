@@ -1,14 +1,17 @@
 from contextlib import contextmanager
+import importlib
+import tempfile
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-import importlib
 
-from app.core.base import Base
 from app.core import config as app_config
+from app.core.base import Base
+from app.core.config import StripeCreditPack
+from app.services import rate_limiter as rate_limiter_service
 
 # Import models so they register with SQLAlchemy metadata.
 from app.models.user import User  # noqa: F401
@@ -20,6 +23,10 @@ from app.models.job_activity import JobActivity  # noqa: F401
 from app.models.job_interview import JobInterview  # noqa: F401
 from app.models.saved_view import SavedView  # noqa: F401
 from app.models.email_verification_code import EmailVerificationCode  # noqa: F401
+from app.models.credit import CreditLedger, AIUsage  # noqa: F401
+from app.models.stripe_event import StripeEvent  # noqa: F401
+from app.models.ai import AIConversation, AIMessage  # noqa: F401
+from app.models.artifact import AIArtifact  # noqa: F401
 
 from app.core.database import get_db
 
@@ -56,6 +63,7 @@ def _stub_s3(monkeypatch):
     """
     Stub S3 client used by app.services.s3 so tests never require AWS creds/network.
     """
+    from app.services import artifact_storage as artifact_storage_service
     from app.services import s3 as s3_service
 
     class FakeS3Client:
@@ -73,6 +81,30 @@ def _stub_s3(monkeypatch):
     app_config.settings.S3_BUCKET_NAME = app_config.settings.S3_BUCKET_NAME or "test-bucket"
     app_config.settings.AWS_REGION = app_config.settings.AWS_REGION or "us-east-1"
 
+    def fake_presign_upload(key: str, content_type: str | None) -> str:
+        return f"https://example.invalid/upload/{key}"
+
+    def fake_presign_view(key: str) -> str:
+        return f"https://example.invalid/view/{key}"
+
+    def fake_download(key: str) -> str:
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        tmp.write(b"sample")
+        tmp.flush()
+        tmp.close()
+        return tmp.name
+
+    def fake_delete(key: str) -> None:
+        return None
+
+    monkeypatch.setattr(artifact_storage_service, "presign_upload", fake_presign_upload)
+    monkeypatch.setattr(artifact_storage_service, "presign_view", fake_presign_view)
+    monkeypatch.setattr(artifact_storage_service, "download_to_tempfile", fake_download)
+    monkeypatch.setattr(artifact_storage_service, "delete", fake_delete)
+    app_config.settings.AI_ARTIFACTS_BUCKET = app_config.settings.AI_ARTIFACTS_BUCKET or "test-artifacts"
+    app_config.settings.AI_ARTIFACTS_S3_PREFIX = app_config.settings.AI_ARTIFACTS_S3_PREFIX or "users"
+    app_config.settings.S3_BUCKET_NAME = app_config.settings.S3_BUCKET_NAME or "test-bucket"
+
 
 @pytest.fixture(autouse=True)
 def _reset_mutable_settings():
@@ -84,7 +116,11 @@ def _reset_mutable_settings():
         "MAX_UPLOAD_BYTES",
         "MAX_PENDING_UPLOADS_PER_JOB",
         "DOC_SCAN_SHARED_SECRET",
-        "ENABLE_RATE_LIMITING",
+        "RATE_LIMIT_ENABLED",
+        "RATE_LIMIT_DEFAULT_WINDOW_SECONDS",
+        "RATE_LIMIT_DEFAULT_MAX_REQUESTS",
+        "AI_RATE_LIMIT_WINDOW_SECONDS",
+        "AI_RATE_LIMIT_MAX_REQUESTS",
         "PASSWORD_MIN_LENGTH",
         "GUARD_DUTY_ENABLED",
         "EMAIL_VERIFICATION_ENABLED",
@@ -94,6 +130,14 @@ def _reset_mutable_settings():
         "RESEND_API_KEY",
         "RESEND_FROM_EMAIL",
         "FRONTEND_BASE_URL",
+        "STRIPE_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "STRIPE_DEFAULT_CURRENCY",
+        "STRIPE_PRICE_MAP",
+        "ENABLE_BILLING_DEBUG_ENDPOINT",
+        "OPENAI_API_KEY",
+        "OPENAI_MODEL",
+        "AI_CREDITS_RESERVE_BUFFER_PCT",
     ]
     original = {k: getattr(app_config.settings, k) for k in keys}
     try:
@@ -101,8 +145,8 @@ def _reset_mutable_settings():
     finally:
         for k, v in original.items():
             setattr(app_config.settings, k, v)
-        # Default all tests to "rate limiting disabled" unless a test explicitly reloads routes with it enabled.
-        app_config.settings.ENABLE_RATE_LIMITING = False
+        app_config.settings.RATE_LIMIT_ENABLED = False
+        rate_limiter_service.reset_rate_limiter()
 
 
 @pytest.fixture()
@@ -112,16 +156,17 @@ def app(db_session, monkeypatch):
     app_config.settings.COGNITO_USER_POOL_ID = app_config.settings.COGNITO_USER_POOL_ID or "local-test-pool"
     app_config.settings.COGNITO_APP_CLIENT_ID = app_config.settings.COGNITO_APP_CLIENT_ID or "test-client-id"
     app_config.settings.COGNITO_JWKS_CACHE_SECONDS = 60
-    app_config.settings.ENABLE_RATE_LIMITING = False
+    app_config.settings.RATE_LIMIT_ENABLED = False
     app_config.settings.RESEND_API_KEY = app_config.settings.RESEND_API_KEY or "test-resend-key"
     app_config.settings.RESEND_FROM_EMAIL = app_config.settings.RESEND_FROM_EMAIL or "Job Tracker <noreply@example.test>"
     app_config.settings.FRONTEND_BASE_URL = app_config.settings.FRONTEND_BASE_URL or "http://localhost:5173"
+    app_config.settings.OPENAI_API_KEY = app_config.settings.OPENAI_API_KEY or "test-openai-key"
+    app_config.settings.OPENAI_MODEL = app_config.settings.OPENAI_MODEL or "gpt-4.1-mini"
+    if not app_config.settings.AI_CREDITS_RESERVE_BUFFER_PCT:
+        app_config.settings.AI_CREDITS_RESERVE_BUFFER_PCT = 25
 
-    # SlowAPI decorators bind at import time, so reload routes with latest settings.
-    import app.routes.documents as documents_routes
     import app.main as main
 
-    importlib.reload(documents_routes)
     importlib.reload(main)
     fastapi_app = main.app
 
@@ -168,6 +213,20 @@ def app(db_session, monkeypatch):
 
     yield fastapi_app
     fastapi_app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def stripe_packs(monkeypatch):
+    packs = {
+        "starter": StripeCreditPack(key="starter", price_id="price_test_starter", credits=500),
+        "pro": StripeCreditPack(key="pro", price_id="price_test_pro", credits=1200),
+    }
+    original = app_config.settings.STRIPE_PRICE_MAP
+    app_config.settings.STRIPE_PRICE_MAP = packs
+    try:
+        yield packs
+    finally:
+        app_config.settings.STRIPE_PRICE_MAP = original
 
 
 @pytest.fixture()

@@ -3,12 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import asc, desc
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
-from app.models.job_application import JobApplication
 from app.models.job_interview import JobInterview
 from app.models.user import User
 from app.schemas.job_interview import JobInterviewCreate, JobInterviewOut, JobInterviewUpdate
@@ -100,6 +99,16 @@ def update_interview(
     job = get_job_for_user(db, job_id, user.id)
     iv = _get_interview_for_user(db, job_id, interview_id, user.id)
 
+    prev = {
+        "scheduled_at": iv.scheduled_at.isoformat() if iv.scheduled_at else None,
+        "stage": iv.stage,
+        "kind": iv.kind,
+        "location": iv.location,
+        "interviewer": iv.interviewer,
+        "status": iv.status,
+        "notes": iv.notes,
+    }
+
     data = payload.model_dump(exclude_unset=True)
     if not data:
         return iv
@@ -120,13 +129,31 @@ def update_interview(
 
     job.last_activity_at = datetime.now(timezone.utc)
 
+    changes = {}
+    for key in prev.keys():
+        if key not in data:
+            continue
+        next_value = getattr(iv, key)
+        if isinstance(next_value, datetime):
+            next_value = next_value.isoformat()
+        if prev[key] != next_value:
+            changes[key] = {"from": prev[key], "to": next_value}
+
     log_job_activity(
         db,
         job_id=job.id,
         user_id=user.id,
         type="interview_updated",
         message="Interview updated",
-        data={"interview_id": iv.id},
+        data={
+            "changes": changes,
+            "scheduled_at": iv.scheduled_at.isoformat() if iv.scheduled_at else None,
+            "stage": iv.stage,
+            "kind": iv.kind,
+            "interviewer": iv.interviewer,
+            "location": iv.location,
+            "status": iv.status,
+        },
     )
 
     db.commit()

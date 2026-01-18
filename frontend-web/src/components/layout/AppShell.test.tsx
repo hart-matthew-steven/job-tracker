@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { within } from "@testing-library/react";
+import type { ReactNode } from "react";
 
 import AppShell from "./AppShell";
 import { LocationDisplay } from "../../test/testUtils";
@@ -13,6 +14,17 @@ const currentUser = vi.hoisted(() => ({
 
 vi.mock("../../hooks/useCurrentUser", () => ({
   useCurrentUser: () => currentUser.useCurrentUser(),
+}));
+
+vi.mock("../../context/CreditsContext", () => ({
+  CreditsProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  __esModule: true,
+  default: {},
+}));
+
+vi.mock("./CreditsBadge", () => ({
+  __esModule: true,
+  default: () => <div data-testid="credits-badge">credits</div>,
 }));
 
 describe("AppShell", () => {

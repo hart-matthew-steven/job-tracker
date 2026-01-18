@@ -29,6 +29,7 @@ import {
   patchSavedView,
   listJobActivity,
   createInterview,
+  patchInterview,
   deleteInterview,
   listInterviews,
   updateUiPreferences,
@@ -1042,6 +1043,26 @@ export default function JobsPage() {
                     await refreshActivity();
                   } catch (e) {
                     const msg = (e as { message?: string } | null)?.message ?? "Failed to add interview";
+                    toast.error(msg, "Interviews");
+                  }
+                }}
+                onUpdate={async (id, draft) => {
+                  if (!selectedJob) return;
+                  try {
+                    await patchInterview(selectedJob.id, id, {
+                      scheduled_at: draft.scheduled_at,
+                      stage: draft.stage || null,
+                      kind: draft.kind || null,
+                      location: draft.location || null,
+                      interviewer: draft.interviewer || null,
+                      status: draft.status || "scheduled",
+                      notes: draft.notes || null,
+                    });
+                    toast.success("Interview updated.", "Interviews");
+                    await refreshInterviews();
+                    await refreshActivity();
+                  } catch (e) {
+                    const msg = (e as { message?: string } | null)?.message ?? "Failed to update interview";
                     toast.error(msg, "Interviews");
                   }
                 }}

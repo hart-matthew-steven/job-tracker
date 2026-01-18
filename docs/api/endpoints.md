@@ -18,6 +18,36 @@ Guidelines:
 
 ---
 
+## Rate limiting
+
+- All `/ai/*`, `/auth/cognito/*`, and `/jobs/{id}/documents/presign-upload` endpoints are protected by a DynamoDB-backed fixed-window limiter. The table (`jobapptracker-rate-limits`) uses `pk=user:{user_id}` or `ip:{client_ip}` and `sk=route:{route_key}:window:{seconds}` to track counters with TTL (`expires_at`).
+- When the limiter fires, the API returns HTTP 429 with `{"error":"RATE_LIMITED","details":{"retry_after_seconds":N}}` and a `Retry-After` header. Tuning knobs live in `.env` (`RATE_LIMIT_ENABLED`, `RATE_LIMIT_DEFAULT_*`, `AI_RATE_LIMIT_*`).
+
+---
+
+## Admin / Operational
+
+> All admin endpoints require Cognito auth **and** `users.is_admin=true`. The reusable dependency `require_admin_user` enforces both.
+
+- `GET /admin/rate-limits/status?user_id=123`
+  - Auth: Bearer (admin only)
+  - Response: `{ "user_id": 123, "records": [{ "limiter_key": "route:ai_chat:window:60", "window_seconds": 60, "limit": 10, "count": 3, "remaining": 7, "expires_at": 1704752852, "record_type": "counter" }] }`
+  - Notes: Queries the DynamoDB limiter table for the given user (or IP if you substitute `user_id` with an internal IP-only identifier) and returns all active windows + overrides. Expired rows are filtered server-side so the UI only shows actionable data.
+
+- `POST /admin/rate-limits/reset`
+  - Auth: Bearer (admin only)
+  - Body: `{ "user_id": 123 }`
+  - Response: `{ "user_id": 123, "deleted": 4 }`
+  - Notes: Batch-deletes every limiter record (including overrides) for the user so the next request starts fresh. Safe to call multiple times; no rows are removed if the table has already expired naturally.
+
+- `POST /admin/rate-limits/override`
+  - Auth: Bearer (admin only)
+  - Body: `{ "user_id": 123, "limit": 50, "window_seconds": 60, "ttl_seconds": 900 }`
+  - Response: `{ "user_id": 123, "limit": 50, "window_seconds": 60, "expires_at": 1704753000 }`
+  - Notes: Writes `sk=override:global` with the provided limit/window and a required TTL. The limiter checks this record before incrementing route keys, so overrides apply to all protected endpoints for that user until the TTL expires or the admin calls `/reset`.
+
+---
+
 ## Auth (`/auth/cognito/*`)
 
 - `POST /auth/cognito/signup`
@@ -91,6 +121,160 @@ Guidelines:
   - Auth: Bearer
   - Body: `{ "preferences": { "job_details_notes_collapsed": true } }`
   - Notes: persists SPA/UI toggles (e.g., collapsed panels) across devices.
+
+---
+
+## Billing / Credits
+
+- `GET /billing/credits/balance`
+  - Auth: Bearer
+  - Response: `{ "currency": "usd", "balance_cents": 5500, "balance_dollars": "55.00", "lifetime_granted_cents": 7000, "lifetime_spent_cents": 1500, "as_of": "2026-01-06T12:34:56Z" }`
+  - Notes: All values come from live `credit_ledger` sums on every request—there is no cached balance.
+  - Future AI endpoints will call `require_credits(...)` before executing and will return HTTP `402 PAYMENT_REQUIRED` if the user lacks sufficient credits.
+
+- `GET /billing/credits/ledger?limit=50&offset=0`
+  - Auth: Bearer
+  - Response: `[{ "amount_cents": 2000, "source": "promo", "description": "...", "source_ref": "promo-jan", "created_at": "..." }, ... ]`
+  - Notes: Entries are returned newest-first and leverage `(user_id, source_ref)` idempotency; Stripe/OpenAI integrations will add to this feed later.
+
+- `GET /billing/me`
+  - Auth: Bearer
+  - Response: `{ "balance_cents": 5500, "stripe_customer_id": "cus_123", "ledger": [ ... ] }`
+  - Notes: Returns a lightweight overview combining the current balance, linked Stripe customer id (if any), and the 10 most recent ledger entries including pack metadata.
+
+- `GET /billing/packs`
+  - Auth: none (public)
+  - Response: `[{ "key": "starter", "credits": 500, "price_id": "price_123", "display_price_dollars": "5.00" }, ...]`
+  - Notes: Packs are derived from `STRIPE_PRICE_MAP` (format: `pack_key:price_id:credits`). The frontend only sends the `pack_key`; the backend resolves price/credits.
+
+- `POST /billing/stripe/checkout`
+  - Auth: Bearer
+  - Body: `{ "pack_key": "starter" }`
+  - Response: `{ "checkout_session_id": "cs_test_123", "checkout_url": "https://checkout.stripe.com/...", "currency": "usd", "pack_key": "starter", "credits_granted": 500 }`
+  - Notes: Pack information (Stripe price id + credits) is resolved server-side from `STRIPE_PRICE_MAP`. Checkout metadata includes `user_id`, `pack_key`, `credits_to_grant`, and `environment` so the webhook can mint credits deterministically. No balance changes occur until the webhook confirms a paid session.
+
+- `POST /billing/stripe/webhook`
+  - Auth: Stripe signature header (`Stripe-Signature`)
+  - Body: Raw Stripe event JSON
+  - Notes: Validates the signature, inserts/locks a `stripe_events` row, and uses metadata (`user_id`, `pack_key`, `credits_to_grant`) on `checkout.session.completed` events to mint a single ledger entry. Duplicate events short-circuit once the `stripe_event_id` is recorded. Failures mark `stripe_events.status=failed` and return HTTP 500 so Stripe retries.
+
+- `POST /billing/credits/debug/spend`
+  - Auth: Bearer (only available when `ENABLE_BILLING_DEBUG_ENDPOINT=true` and `ENV!=prod`)
+  - Body: `{ "amount_cents": 250, "reason": "dev smoke test", "idempotency_key": "debug-1" }`
+  - Notes: Dev-only helper to simulate credit consumption without going through the paid AI flow. Uses the same `spend_credits/require_credits` path the future OpenAI integration will call.
+
+---
+
+## AI usage
+
+- `POST /ai/chat`
+  - Auth: Bearer
+  - Body:
+    ```json
+    {
+      "request_id": "chat-123",
+      "messages": [
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "Draft a follow-up email."}
+      ]
+    }
+    ```
+  - Response: `{ "request_id": "chat-123", "model": "gpt-4.1-mini", "response_text": "...", "prompt_tokens": 900, "completion_tokens": 350, "credits_used_cents": 240, "credits_refunded_cents": 60, "credits_reserved_cents": 300, "credits_remaining_cents": 4700, "credits_remaining_dollars": "47.00" }`
+  - Notes: The backend tokenizes prompts with OpenAI’s tokenizer (`tiktoken`), budgets `AI_COMPLETION_TOKENS_MAX` completion tokens, applies `AI_CREDITS_RESERVE_BUFFER_PCT` (currently 25%), reserves *more* credits than needed, calls OpenAI, then finalizes the reservation with the actual cost. If the OpenAI response exceeds the reservation the entire reservation is refunded and the API returns HTTP 500 so the client can retry with a fresh request id. Passing the same `request_id` makes the call idempotent—success responses are replayed without hitting OpenAI again. Exceeding `AI_RATE_LIMIT_MAX_REQUESTS` within `AI_RATE_LIMIT_WINDOW_SECONDS` returns HTTP 429 with a `Retry-After` header.
+
+- `GET /ai/config`
+  - Auth: Bearer
+  - Response: `{ "max_input_chars": 12000 }`
+  - Notes: Returns the current `AI_MAX_INPUT_CHARS` limit so the frontend can size text areas and counters dynamically without redeploying whenever the backend configuration changes.
+
+### Conversations (`/ai/conversations*`)
+
+- `POST /ai/conversations`
+  - Auth: Bearer
+  - Body: `{ "title": "Resume polish", "message": "Review my resume summary" }` (message optional)
+  - Response: `ConversationDetailResponse` with the first page of messages.
+  - Notes: Creates a durable conversation row. If `message` is provided the backend sends it to OpenAI, stores both the user + assistant messages, and returns the new thread. DynamoDB rate limiting + in-process concurrency limits are enforced whenever a message is sent (HTTP 429 on overage).
+
+- `GET /ai/conversations?limit=20&offset=0`
+  - Auth: Bearer
+  - Response: `{ conversations: [{ id, title, message_count, created_at, updated_at }], next_offset }`
+  - Notes: Lists the caller’s conversations ordered by `updated_at desc`. Subject to the same rate limiter as other AI routes.
+
+- `GET /ai/conversations/{conversation_id}?limit=50&offset=0`
+  - Auth: Bearer
+  - Response: `ConversationDetailResponse` including paged messages (oldest-first).
+  - Notes: Rejects access to conversations owned by another user.
+
+- `POST /ai/conversations/{conversation_id}/messages`
+  - Auth: Bearer
+  - Body: `{ "content": "Draft a thank-you email" , "request_id": "msg-123" }`
+  - Response: `{ conversation_id, user_message, assistant_message, credits_used_cents, credits_reserved_cents, credits_remaining_* }`
+  - Notes: Appends a user message, builds a trimmed history (max `AI_MAX_CONTEXT_MESSAGES`), reserves credits, calls OpenAI, stores the assistant reply, and debits the final cost. Each `request_id` is idempotent. Returns 402 when the user lacks credits, 429 when the per-minute/concurrency guardrails fire, and 503 when OpenAI is temporarily unavailable.
+
+- `PATCH /ai/conversations/{conversation_id}`
+  - Auth: Bearer
+  - Body: `{ "title": "Weekly sync prep" }` (omit or send `null` to clear the custom title)
+  - Response: `ConversationDetailResponse`
+  - Notes: Renames the conversation (or clears the title) and returns the updated metadata + first page of messages. Changing the title doesn’t spend credits.
+
+- `DELETE /ai/conversations/{conversation_id}`
+  - Auth: Bearer
+  - Response: HTTP 204
+  - Notes: Permanently deletes the conversation and all associated messages for the authenticated user. Credits/usage rows remain for audit but are detached via the existing foreign-key cascade.
+
+### AI Artifacts
+
+- `POST /ai/artifacts/upload-url`
+  - Auth: Bearer
+  - Body: `{ "conversation_id": 123, "artifact_type": "resume", "filename": "resume.docx", "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }`
+  - Response: `{ "artifact_id": 45, "upload_url": "https://..." }`
+  - Notes: Creates a placeholder artifact record, pins it to the given conversation/role, and returns a short-lived presigned PUT URL for S3. After the client uploads the file it must call `/ai/artifacts/{id}/complete-upload` to kick off background processing.
+
+- `POST /ai/artifacts/{artifact_id}/complete-upload`
+  - Auth: Bearer
+  - Response: `{ "artifact_id": 45, "status": "pending" }`
+  - Notes: Marks the upload as ready for processing and enqueues the Celery worker to extract text from the document. If the artifact wasn’t created via the upload flow, the endpoint returns 400.
+
+- `POST /ai/artifacts/text`
+  - Auth: Bearer
+  - Body: `{ "conversation_id": 123, "artifact_type": "resume", "content": "Plain-text resume..." }`
+  - Response: `{ "artifact_id": 46, "status": "ready" }`
+  - Notes: Stores pasted text directly without background processing. Useful for quick iterations or when a user doesn’t have a file handy.
+
+- `POST /ai/artifacts/url`
+  - Auth: Bearer
+  - Body: `{ "conversation_id": 123, "artifact_type": "job_description", "url": "https://jobs.example.com/posting/abc" }`
+  - Response: `{ "artifact_id": 47, "status": "pending" }`
+  - Notes: Enqueues a Celery scrape job that fetches the page, runs it through readability/BeautifulSoup, and stores the cleaned text. On authentication/anti-bot failures the artifact will land in `failed` with a human-readable reason so the UI can prompt for manual paste.
+
+- `POST /ai/artifacts/{artifact_id}/pin`
+  - Auth: Bearer
+  - Body: `{ "conversation_id": 123 }`
+  - Response: `{ "artifact_id": 45, "status": "pending" | "ready" | "failed" }`
+  - Notes: Re-pins an existing artifact (e.g., reuse the same resume across multiple conversations). The unique `(conversation, role)` constraint ensures at most one active resume + JD per thread.
+
+- `GET /ai/artifacts/conversations/{conversation_id}`
+  - Auth: Bearer
+  - Response: `{ "artifacts": [ { "artifact_id": 45, "artifact_type": "resume", "version_number": 3, "status": "ready", "source_type": "upload", "created_at": "...", "failure_reason": null, "view_url": "https://..." }, ... ] }`
+  - Notes: Returns the currently pinned artifacts (resume, job description, notes) along with their version history metadata and an optional presigned GET URL if the artifact has a binary backing file.
+
+---
+
+## AI demo / reservation stub
+
+- `POST /ai/demo`
+  - Auth: Bearer
+  - Body:
+    ```
+    {
+      "idempotency_key": "demo-123",
+      "estimated_cost_credits": 1200,
+      "simulate_outcome": "success" | "fail",
+      "actual_cost_credits": 900   # optional override when simulate_outcome=success
+    }
+    ```
+  - Response: `{ reservation_id, correlation_id, status: "success"|"refunded", balance_cents, ledger_entries: [...] }`
+  - Notes: Reserves credits (`entry_type=ai_reserve`), then either releases + charges (`ai_release` + `ai_charge`) or refunds (`ai_refund`). This endpoint is a smoke test for the reservation/finalize/refund primitives that real AI routes will call before contacting OpenAI.
 
 ---
 

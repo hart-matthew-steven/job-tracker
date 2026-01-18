@@ -4,10 +4,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from slowapi.errors import RateLimitExceeded
-
 from app.core.config import settings
-from app.core.rate_limit import limiter
 from app.middleware.identity import register_identity_middleware
 from app.routes.auth_cognito import router as auth_cognito_router
 from app.routes.job_applications import router as jobs_router
@@ -18,6 +15,14 @@ from app.routes.saved_views import router as saved_views_router
 from app.routes.activity import router as activity_router
 from app.routes.interviews import router as interviews_router
 from app.routes.internal_documents import router as internal_documents_router
+from app.routes.stripe_billing import router as stripe_billing_router
+from app.routes.billing import router as billing_router
+from app.routes.ai_demo import router as ai_demo_router
+from app.routes.ai_chat import router as ai_chat_router
+from app.routes.ai_conversations import router as ai_conversations_router
+from app.routes.ai_config import router as ai_config_router
+from app.routes.ai_artifacts import router as ai_artifacts_router
+from app.routes.admin_rate_limits import router as admin_rate_limits_router
 
 
 # -------------------------------------------------------------------
@@ -91,7 +96,8 @@ def http_exception_handler(request: Request, exc: HTTPException):
     payload: dict = {"error": _error_code(exc.status_code), "message": message}
     if details:
         payload["details"] = details
-    return JSONResponse(status_code=exc.status_code, content=payload)
+    headers = getattr(exc, "headers", None)
+    return JSONResponse(status_code=exc.status_code, content=payload, headers=headers)
 
 
 @app.exception_handler(RequestValidationError)
@@ -103,20 +109,6 @@ def validation_exception_handler(request: Request, exc: RequestValidationError):
             "message": "Invalid request payload",
             "details": {"errors": exc.errors()},
         },
-    )
-
-
-# -------------------------------------------------------------------
-# Rate limiting (optional)
-# -------------------------------------------------------------------
-if settings.ENABLE_RATE_LIMITING:
-    app.state.limiter = limiter
-    app.add_exception_handler(
-        RateLimitExceeded,
-        lambda request, exc: JSONResponse(
-            status_code=429,
-            content={"error": "RATE_LIMITED", "message": "Too many requests"},
-        ),
     )
 
 
@@ -145,6 +137,14 @@ app.include_router(saved_views_router)
 app.include_router(activity_router)
 app.include_router(interviews_router)
 app.include_router(internal_documents_router)
+app.include_router(stripe_billing_router)
+app.include_router(billing_router)
+app.include_router(ai_demo_router)
+app.include_router(ai_chat_router)
+app.include_router(ai_conversations_router)
+app.include_router(ai_config_router)
+app.include_router(ai_artifacts_router)
+app.include_router(admin_rate_limits_router)
 
 
 # -------------------------------------------------------------------

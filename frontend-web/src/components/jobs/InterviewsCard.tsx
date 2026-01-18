@@ -45,6 +45,7 @@ type Props = {
   loading?: boolean;
   error?: string;
   onCreate: (draft: InterviewDraft) => Promise<void> | void;
+  onUpdate?: (id: number, draft: InterviewDraft) => Promise<void> | void;
   onDelete: (id: number) => Promise<void> | void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
@@ -56,6 +57,7 @@ export default function InterviewsCard({
   loading = false,
   error = "",
   onCreate,
+  onUpdate,
   onDelete,
   collapsed = false,
   onToggleCollapse,
@@ -68,6 +70,7 @@ export default function InterviewsCard({
     "dark:border-slate-700 dark:bg-slate-950/30 dark:text-slate-100 dark:placeholder:text-slate-400";
 
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState<InterviewDraft>(() => ({
     scheduled_at: new Date().toISOString(),
     stage: "",
@@ -77,12 +80,46 @@ export default function InterviewsCard({
     status: "scheduled",
     notes: "",
   }));
+  const isEditing = editingId !== null;
 
   const sorted = useMemo(() => {
     const list = Array.isArray(items) ? [...items] : [];
     list.sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime());
     return list;
   }, [items]);
+
+  function resetDraft() {
+    setDraft({
+      scheduled_at: new Date().toISOString(),
+      stage: "",
+      kind: "",
+      location: "",
+      interviewer: "",
+      status: "scheduled",
+      notes: "",
+    });
+  }
+
+  function openCreate() {
+    setEditingId(null);
+    resetDraft();
+    setOpen(true);
+  }
+
+  function openEdit(iv: JobInterview) {
+    if (!onUpdate) return;
+    setEditingId(iv.id);
+    setDraft({
+      scheduled_at: iv.scheduled_at,
+      stage: iv.stage ?? "",
+      kind: iv.kind ?? "",
+      location: iv.location ?? "",
+      interviewer: iv.interviewer ?? "",
+      status: iv.status ?? "scheduled",
+      notes: iv.notes ?? "",
+    });
+    setOpen(true);
+  }
 
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
@@ -92,7 +129,7 @@ export default function InterviewsCard({
           {!collapsed && !demoMode && (
             <button
               type="button"
-              onClick={() => setOpen(true)}
+              onClick={openCreate}
               className="rounded-lg px-3 py-2 text-xs font-semibold transition border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
             >
               + Add interview
@@ -138,13 +175,26 @@ export default function InterviewsCard({
                     {iv.notes && <div className="mt-2 text-sm text-slate-200 whitespace-pre-wrap break-words">{iv.notes}</div>}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => onDelete(iv.id)}
-                    className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition border border-red-800/70 bg-red-950/20 text-red-200 hover:bg-red-950/30"
-                  >
-                    Delete
-                  </button>
+                  <div className="shrink-0 flex flex-col gap-2">
+                    {!demoMode && onUpdate && (
+                      <button
+                        type="button"
+                        onClick={() => openEdit(iv)}
+                        className="rounded-lg px-3 py-2 text-xs font-semibold transition border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {!demoMode && (
+                      <button
+                        type="button"
+                        onClick={() => onDelete(iv.id)}
+                        className="rounded-lg px-3 py-2 text-xs font-semibold transition border border-red-800/70 bg-red-950/20 text-red-200 hover:bg-red-950/30"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -155,25 +205,26 @@ export default function InterviewsCard({
       {!demoMode && (
         <Modal
           open={open}
-          onClose={() => setOpen(false)}
-          title="Add interview"
+          onClose={() => {
+            setOpen(false);
+            setEditingId(null);
+            resetDraft();
+          }}
+          title={isEditing ? "Edit interview" : "Add interview"}
           maxWidthClassName="max-w-2xl"
         >
         <form
           onSubmit={(e) => {
             e.preventDefault();
             void (async () => {
-              await onCreate(draft);
+              if (isEditing && editingId !== null) {
+                await onUpdate?.(editingId, draft);
+              } else {
+                await onCreate(draft);
+              }
               setOpen(false);
-              setDraft({
-                scheduled_at: new Date().toISOString(),
-                stage: "",
-                kind: "",
-                location: "",
-                interviewer: "",
-                status: "scheduled",
-                notes: "",
-              });
+              setEditingId(null);
+              resetDraft();
             })();
           }}
           className="space-y-4"

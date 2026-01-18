@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.dependencies.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.rate_limit import limiter
 from app.models.job_application import JobApplication
 from app.models.job_document import JobDocument
 from app.models.user import User
@@ -20,6 +19,7 @@ from app.schemas.job_document import (
 )
 from app.schemas.job_document_scan import DocumentScanIn
 from app.services.s3 import delete_object, presign_download, presign_upload, head_object
+from app.dependencies.rate_limit import require_rate_limit
 from app.services.activity import log_job_activity
 from app.services.jobs import get_job_for_user
 from app.services.documents import (
@@ -34,17 +34,34 @@ from app.services.documents import (
 router = APIRouter(prefix="/jobs", tags=["documents"])
 logger = logging.getLogger(__name__)
 
+_upload_rate_limit = Depends(
+    require_rate_limit(
+        route_key="document_presign_upload",
+        limit=10,
+        window_seconds=60,
+    )
+)
+_delete_rate_limit = Depends(
+    require_rate_limit(
+        route_key="document_delete",
+        limit=30,
+        window_seconds=60,
+    )
+)
+_confirm_rate_limit = Depends(
+    require_rate_limit(
+        route_key="document_confirm_upload",
+        limit=20,
+        window_seconds=60,
+    )
+)
 
-def _maybe_limit(rule: str):
-    if not settings.ENABLE_RATE_LIMITING:
-        def passthrough(fn):
-            return fn
-        return passthrough
-    return limiter.limit(rule)
 
-
-@router.post("/{job_id}/documents/presign-upload", response_model=PresignUploadOut)
-@_maybe_limit("10/minute")
+@router.post(
+    "/{job_id}/documents/presign-upload",
+    response_model=PresignUploadOut,
+    dependencies=[_upload_rate_limit],
+)
 def create_document_presign_upload(
     request: Request,
     job_id: int,
@@ -92,15 +109,6 @@ def create_document_presign_upload(
     db.commit()
     db.refresh(doc)
 
-    # Track that a document was created (pending upload)
-    log_job_activity(
-        db,
-        job_id=job.id,
-        user_id=user.id,
-        type="document_added",
-        message="Document added",
-        data={"document_id": doc.id, "doc_type": doc_type, "filename": filename},
-    )
     db.commit()
 
     return {"document": doc, "upload_url": result.upload_url}
@@ -147,8 +155,10 @@ def get_document_download_url(
     return {"download_url": presign_download(doc.s3_key)}
 
 
-@router.delete("/{job_id}/documents/{doc_id}")
-@_maybe_limit("30/minute")
+@router.delete(
+    "/{job_id}/documents/{doc_id}",
+    dependencies=[_delete_rate_limit],
+)
 def delete_document(
     request: Request,
     job_id: int,
@@ -188,8 +198,11 @@ def delete_document(
     return {"deleted": True}
 
 
-@router.post("/{job_id}/documents/confirm-upload", response_model=DocumentOut)
-@_maybe_limit("20/minute")
+@router.post(
+    "/{job_id}/documents/confirm-upload",
+    response_model=DocumentOut,
+    dependencies=[_confirm_rate_limit],
+)
 def confirm_upload(
     request: Request,
     job_id: int,

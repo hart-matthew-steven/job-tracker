@@ -14,6 +14,7 @@ Update it whenever key entry points or folder structure changes.
   - Auth: `frontend-web/src/pages/auth/*`
   - Core: `frontend-web/src/pages/DashboardPage.tsx`, `frontend-web/src/pages/JobsPage.tsx`
   - Account: `frontend-web/src/pages/account/index.tsx`
+  - AI Assistant: `frontend-web/src/pages/ai/AIAssistantPage.tsx` (left-nav entry, conversation list + chat surface + composer)
   - Marketing/demo: `frontend-web/src/pages/landing/LandingPage.tsx` (hero + CTA) and `frontend-web/src/pages/landing/DemoBoardPage.tsx` (read-only board preview for unauthenticated visitors)
 - Auth/session plumbing (tokens + idle timeout): `frontend-web/src/auth/AuthProvider.tsx`
 - UI building blocks:
@@ -48,6 +49,19 @@ Update it whenever key entry points or folder structure changes.
 - Backend tests: `backend/tests/` (pytest)
 - Backend env var reference: `backend/.env.example` (generated, names only)
 - User preferences API: `backend/app/routes/users.py` (`/users/me`, `/users/me/settings`, `/users/me/ui-preferences`)
+- Billing:
+  - Config: `STRIPE_PRICE_MAP` parsing + helpers live in `backend/app/core/config.py` (`StripeCreditPack`, `settings.get_stripe_pack()`).
+  - Routes: `/billing/*` in `backend/app/routes/billing.py` (balances/ledger/me/packs) and `/billing/stripe/*` in `backend/app/routes/stripe_billing.py` (checkout + webhook).
+  - Service helpers: `backend/app/services/stripe.py` (customer linking, pack/key checkout sessions, transactional webhook processing) and `backend/app/services/credits.py` (`get_balance_summary`, `reserve_credits`, `finalize_charge`, `refund_reservation`, `spend_credits`, formatting helpers).
+  - Models: `backend/app/models/credit.py` (`credit_ledger`, `ai_usage`) and `backend/app/models/stripe_event.py` (`status`, `error_message`, `processed_at`).
+- AI usage:
+  - Client wrapper: `backend/app/services/openai_client.py` (OpenAI SDK wrapper, retries, usage dataclasses).
+  - Orchestrator: `backend/app/services/ai_usage.py` (token estimation, buffered reservations, settlement/refund, idempotency, response caching).
+  - Conversations: `backend/app/services/ai_conversation.py`, `backend/app/services/limits.py`, and `backend/app/routes/ai_conversations.py` (`POST/GET /ai/conversations`, `GET /ai/conversations/{id}`, `POST /ai/conversations/{id}/messages`).
+  - Models: `backend/app/models/ai.py` (`AIConversation`, `AIMessage`) and `backend/app/models/credit.py` (`AIUsage` with conversation/message/idempotency fields). `AIMessage.balance_remaining_cents` captures the user’s post-response balance for UI metadata.
+  - Routes: `/ai/chat` (`backend/app/routes/ai_chat.py`) remains the single-call endpoint; `/ai/demo` (`backend/app/routes/ai_demo.py`) is still the dev-only reservation harness. Purpose-aware conversation flows live under `/ai/conversations*` (create/list/get/message + PATCH rename + DELETE), and `/ai/config` (`backend/app/routes/ai_config.py`) exposes configuration (currently `max_input_chars`) to clients.
+- Artifact ingestion: `/ai/artifacts/upload-url` issues S3 presigns, `/ai/artifacts/{id}/complete-upload` enqueues document parsing, `/ai/artifacts/text` stores paste blobs, `/ai/artifacts/url` scrapes linked JDs, `/ai/artifacts/{id}/pin` reuses prior uploads, and `GET /ai/artifacts/conversations/{conversation_id}` exposes the pinned artifacts (resume/JD/note) with version metadata.
+  - Rate limiting: `backend/app/services/rate_limiter.py` (factory/Noop), `backend/app/services/rate_limiter_dynamo.py` (DynamoDB implementation), and `backend/app/dependencies/rate_limit.py` (`require_rate_limit` dependency shared by `/ai/*`, `/auth/cognito/*`, and document presigns).
 - Deployment: README "Production deployment (AWS App Runner)" section documents the ECR/App Runner flow (buildx `linux/amd64`, Secrets Manager env injection, `api.jobapptracker.dev` endpoint).
 
 ## Architecture Docs

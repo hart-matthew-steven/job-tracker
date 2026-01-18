@@ -23,6 +23,10 @@ Keep it concise, factual, and employer-facing.
 - Profile + Change Password wired to backend APIs.
 - Landing page hero copy no longer references “private alpha” or Jira, and the “View demo board” CTA sends visitors to `/demo/board`, a read-only board preview rendered entirely in the browser so they can experience the kanban UX without signing in.
 - AppShell keeps the search affordance and “Create job” CTA visible in the header even on mobile breakpoints; the drawer is nav-only. This ensures primary actions stay one tap away regardless of screen size.
+- Billing loop: the AppShell header shows the current prepaid credit balance, `/billing` lists the three Stripe packs (Starter/Plus/Max) with frontend-controlled labels/badges, and `/billing/return` (plus the legacy `/billing/stripe/success|cancelled` paths) shows success/cancel outcomes and triggers a balance refresh after Stripe redirects back. Pack labels can be overridden via `VITE_BILLING_PACK_CONFIG` without changing backend `pack_key`s.
+- AI Assistant is now a first-class route (`/ai-assistant`). The left nav gets an “AI Assistant” icon, the screen dedicates the left rail to conversation history (with an overflow menu housing rename/delete actions), the right pane to the thread, and the composer defaults to “General chat” while still offering optional presets (Cover Letter / Thank You Letter / Resume Tailoring). It calls `GET/POST/PATCH/DELETE /ai/conversations*`, displays per-response token + credit usage (including remaining credits), surfaces “Generating…” states, and shows tailored banners for 402/429/5xx responses (with a “Buy credits” CTA linking to `/billing` for insufficiency). Tests cover rendering, list loading, insufficient-credit messaging, metadata output, the action menu (rename/delete), and the dynamic textarea limit.
+- AI artifacts: `/ai/artifacts/upload-url|complete-upload|text|url|pin` plus `GET /ai/artifacts/conversations/{id}` let users attach/pin resumes + job descriptions. Uploads live in a dedicated S3 bucket (prefix `AI_ARTIFACTS_S3_PREFIX`), and Celery workers (App Runner service reading from the configured SQS queue) extract or scrape text via python-docx/pdfplumber/readability/BeautifulSoup. Each conversation keeps one active artifact per role (`resume`, `job_description`, `note`), and older versions are trimmed according to `MAX_ARTIFACT_VERSIONS`. View URLs are served via presigned GETs so the SPA can show “what’s in context.”
+- `GET /ai/config` exposes `AI_MAX_INPUT_CHARS` so the frontend can size its textarea/validation without redeploying when the backend budget changes.
 - Settings page wired to backend:
   - Auto refresh frequency
   - Jobs default sort/view
@@ -59,6 +63,18 @@ Keep it concise, factual, and employer-facing.
 - Documents:
   - Presigned S3 upload flow implemented (presign → upload to S3 → confirm). GuardDuty Malware Protection + Lambda forwarder update `scan_status` before downloads are allowed. The Lambda now reads `DOC_SCAN_SHARED_SECRET` from AWS Secrets Manager via `DOC_SCAN_SHARED_SECRET_ARN` (not plain env text) before calling `/jobs/{job_id}/documents/{document_id}/scan-result`.
 - Debug endpoints `/auth/debug/token-info` + `/auth/debug/identity` remain dev-only. Authorization across the app depends on Cognito access tokens + DB ownership checks; there is no custom JWT mode anymore.
+- Billing:
+  - `credit_ledger` (integer cents) + `stripe_events` (raw payload, `status`, `processed_at`, `error`) are the source of truth for prepaid credits.
+  - `STRIPE_PRICE_MAP` configures credit packs (`pack_key:price_id:credits`). `/billing/stripe/checkout` only accepts a `pack_key` and stamps metadata (`user_id`, `pack_key`, `credits_to_grant`, `environment`) into the Checkout Session so the webhook can mint credits deterministically.
+  - `/billing/stripe/webhook` validates the signature, inserts `stripe_events` (`status=pending`), runs the handler transactionally, writes to `credit_ledger` with pack/session metadata + `idempotency_key`, and updates status to `processed|skipped|failed`. Failures capture the error and return HTTP 500 so Stripe retries.
+  - `/billing/me` exposes the balance + Stripe customer id + the latest ledger entries; `/billing/packs` surfaces the configured packs for the frontend. `/billing/credits/balance` now also reports lifetime grants/spend and an `as_of` timestamp.
+  - `reserve_credits`/`finalize_charge`/`refund_reservation` form the enforcement layer: reserve rows (`entry_type=ai_reserve`) reduce the available balance immediately, finalize rewrites the ledger with `ai_release` + `ai_charge`, and refunds write `ai_refund`. Each step is idempotent via its own `idempotency_key`. `/ai/chat` tokenizes prompts with `tiktoken`, budgets `AI_COMPLETION_TOKENS_MAX` completion tokens, over-reserves with `AI_CREDITS_RESERVE_BUFFER_PCT`, then calls OpenAI and settles/refunds; `/ai/demo` remains the dev-only harness.
+- AI conversations:
+  - `ai_conversations` + `ai_messages` tables persist durable chat sessions (title, timestamps, per-message role/content/tokens/credits/model/request id). `ai_usage` rows now carry `conversation_id`, `message_id`, `idempotency_key`, and `response_id` for end-to-end traceability.
+  - API surface: `POST /ai/conversations` (optional first message), `GET /ai/conversations`, `GET /ai/conversations/{id}`, and `POST /ai/conversations/{id}/messages`. Ownership is enforced everywhere; the message endpoint is the only way credits are deducted.
+  - `AIConversationService` pulls the last `AI_MAX_CONTEXT_MESSAGES` from `ai_messages`, enforces `AI_MAX_INPUT_CHARS`, writes the new user message, calls `AIUsageOrchestrator`, persists the assistant reply, and updates `ai_usage`.
+  - Purpose prompts are now part of the schema (Cover Letter / Thank You Letter / Resume Tailoring). When supplied, the service prepends a purpose-specific system instruction to the OpenAI payload without storing that text in the user transcript, so each reply stays contextual without polluting history. Assistant messages also record `balance_remaining_cents` so the UI can show the post-response balance per bubble.
+- Guardrails: `AI_REQUESTS_PER_MINUTE`, `AI_MAX_CONCURRENT_REQUESTS`, `AI_MAX_CONTEXT_MESSAGES`, `AI_MAX_INPUT_CHARS`, `AI_COMPLETION_TOKENS_MAX`, and `AI_OPENAI_MAX_RETRIES` all live in `Settings` + `.env.example`. Concurrency still uses the in-process limiter, but request-level throttling now runs through DynamoDB (`jobapptracker-rate-limits`), keyed by `user:{id}`/`ip:{addr}` + `route:{key}:window:{seconds}` with TTL-based expiry. When actual OpenAI cost exceeds the reservation we finalize the reserved amount, attempt to spend the delta via `CreditsService.spend_credits`, and refund/return HTTP 402 if the user lacks funds—no silent absorption.
 
 ## What Is Working
 - Cognito signup → confirm → login → MFA setup/verify → authenticated app access.
@@ -70,6 +86,8 @@ Keep it concise, factual, and employer-facing.
 - Tags end-to-end (stored on jobs; filterable in UI; persisted in saved views).
 - Job activity timeline (notes/documents/status updates).
 - Job interviews CRUD in UI + backend.
+- Stripe prepaid credits: pack-based Checkout, webhook-driven credit grants, `/billing/me`/`/billing/credits/*` APIs, and webhook idempotency backed by `stripe_events`.
+- Credits badge + billing UI: the frontend now fetches `/billing/credits/balance` into a shared context, shows the balance in the AppShell header, exposes `/billing` for pack purchases (Starter/Plus/Max with frontend-controlled labels via `VITE_BILLING_PACK_CONFIG`), and adds `/billing/return` (plus aliases for the legacy `/billing/stripe/success|cancelled` paths) to display checkout success/cancel states and refresh balances after Stripe redirects back. Tests cover the badge, billing page, and return page flows.
 
 ## Partially Implemented / Deferred
 - Offer tracking (explicitly deferred / skipped for now).
@@ -96,6 +114,21 @@ Keep it concise, factual, and employer-facing.
 - Tailwind v4 note: `dark:` is configured to follow the `.dark` class via `@custom-variant` in `frontend-web/src/index.css` (not media-based).
 
 ## Recent Changes (High Signal)
+- DynamoDB rate limiter:
+  - Replaced the old SlowAPI/in-memory toggle with a shared limiter backed by `jobapptracker-rate-limits` (PK `pk=user:{id}|ip:{addr}`, SK `route:{key}:window:{seconds}`, TTL `expires_at`).
+  - Covers `/ai/*`, `/auth/cognito/*`, and document upload presigns so App Runner can scale horizontally without losing quotas. Exceeding the limit raises HTTP 429 with `Retry-After`.
+  - Env knobs: `RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, `RATE_LIMIT_DEFAULT_WINDOW_SECONDS`, `RATE_LIMIT_DEFAULT_MAX_REQUESTS`, `AI_RATE_LIMIT_WINDOW_SECONDS`, `AI_RATE_LIMIT_MAX_REQUESTS`. Disabled by default for local dev.
+- AI chat sessions (Phase A):
+  - Added `ai_conversations`/`ai_messages` tables, extended `ai_usage` with `conversation_id`/`message_id`/`response_id`/`idempotency_key`, and wired migrations/ORM models.
+  - Introduced `AIConversationService`, `app/services/limits.py`, and `app/services/ai_conversation.py` to orchestrate context trimming, reservations, OpenAI calls, and message persistence.
+  - New endpoints: `POST/GET /ai/conversations`, `GET /ai/conversations/{id}`, `POST /ai/conversations/{id}/messages`. Responses include recent messages, credit deltas, and remaining balance.
+  - Hardening: module-level rate/concurrency limiters + dependency seam, `AI_MAX_*` env vars, correlation ids (`X-Request-Id`), OpenAI retries with jitter, and safer settlement (charge delta only if balance allows, otherwise refund + HTTP 402).
+  - Tests cover orchestrator deltas/idempotency, rate/concurrency limiters, conversation routes (persistence + 402/429/503 paths), and schema docs were updated accordingly.
+- Stripe billing hardening:
+  - Added `stripe_customer_id` linkage, `STRIPE_PRICE_MAP` parser, `/billing/packs`, and `/billing/me`.
+  - Checkout now accepts only `pack_key`; metadata instructs the webhook how many credits to mint.
+  - Webhooks use transactional inserts into `stripe_events` (with status/error fields) plus ledger entries that capture pack key + Stripe ids; duplicates short-circuit, failures mark the row and return HTTP 500 for retries.
+  - Tests cover checkout metadata, webhook idempotency/failure, new billing APIs, and pack listing.
 - Idle-time logout: the frontend now clears Cognito tokens after ~30 minutes of inactivity (configurable via `VITE_IDLE_TIMEOUT_MINUTES`; min 5) to reduce risk from abandoned tabs without changing Cognito’s refresh token policy.
 - Mobile AppShell parity: search + Create now live in the header on every breakpoint, eliminating the need to open the drawer to add roles on phones/tablets. Drawer tests cover the status-change flow to guard against regressions.
 - Jobs page performance: added `GET /jobs/{job_id}/details` to bundle job + notes + interviews + activity, replacing four sequential requests on every selection.

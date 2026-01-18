@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session, selectinload
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import desc, or_, func
+from sqlalchemy import desc, or_
 
 from app.dependencies.auth import get_current_user
 from app.core.database import get_db

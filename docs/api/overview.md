@@ -83,6 +83,20 @@ For flow details, see:
 
 ---
 
+## Rate Limiting
+
+- Protected routes call `require_rate_limit(route_key, limit, window_seconds)` before hitting business logic. Rows are stored in DynamoDB as `{pk=user:{id}|ip:{addr}, sk=route:{key}:window:{seconds}}` with `window_start`, `count`, `request_limit`, `window_seconds`, `route_key`, `item_type`, and TTL (`expires_at`). Overrides live at `sk=override:global` with their own TTL so temporary exceptions self-expire.
+- Every decision emits a structured JSON log (`user_id`, `route`, `http_method`, `limiter_key`, `window_seconds`, `limit`, `count`, `remaining`, `reset_epoch`, `decision`). When a customer reports HTTP 429 you can search the logs by `user_id` or limiter key to see exactly which window fired.
+- Admin-only tooling:
+  - `GET /admin/rate-limits/status?user_id=<id>` lists all active limiter items (counters + overrides) for that user.
+  - `POST /admin/rate-limits/reset` deletes the rows so the next request starts fresh.
+  - `POST /admin/rate-limits/override` writes a short-lived override (`limit`, `window_seconds`, `ttl_seconds`) that applies before normal route keys.
+  - **Promotion is manual by design.** Run `UPDATE users SET is_admin=true WHERE email='you@example.com';` from psql to grant access; there is no public “make me admin” endpoint.
+- Exceeding the configured budget (e.g., `AI_RATE_LIMIT_MAX_REQUESTS` within `AI_RATE_LIMIT_WINDOW_SECONDS`) yields HTTP 429 and sets the `Retry-After` header. Per-IP fallback ensures anonymous callers are throttled even without Cognito identity.
+- Configuration knobs live in `.env.example` (`RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, default + AI-specific window/limit values). Local dev keeps the limiter disabled unless you explicitly enable it with AWS credentials.
+
+---
+
 ## Bundled responses
 
 To keep the SPA snappy on high-latency networks, some routes intentionally return multiple resource types at once. Key examples:

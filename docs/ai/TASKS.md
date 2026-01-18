@@ -86,6 +86,27 @@
   - Hide jobs after N days (UI-only hiding; data stays in DB)
 
 ## Completed
+- DynamoDB rate limiter:
+  - Replaced the SlowAPI decorators with `require_rate_limit(...)` backed by `jobapptracker-rate-limits` (PK `pk=user:{id}|ip:{addr}`, SK `route:{key}:window:{seconds}`, TTL `expires_at`).
+  - Added env knobs `RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, `RATE_LIMIT_DEFAULT_WINDOW_SECONDS`, `RATE_LIMIT_DEFAULT_MAX_REQUESTS`, `AI_RATE_LIMIT_WINDOW_SECONDS`, `AI_RATE_LIMIT_MAX_REQUESTS`.
+  - Tests stub DynamoDB (window rollover, TTL, limit enforcement) and verify `/ai/chat` returns HTTP 429 + `Retry-After`.
+- AI conversations + guardrails:
+  - Added `ai_conversations`/`ai_messages` tables, extended `ai_usage`, and implemented `AIConversationService` plus the DynamoDB-backed rate limiter (`require_rate_limit(...)`) and the in-memory concurrency limiter for per-user fan-out control.
+  - New endpoints: `POST/GET /ai/conversations`, `GET /ai/conversations/{id}`, `POST /ai/conversations/{id}/messages`, each enforcing ownership, pagination, and prepaid credits.
+  - Config grew `AI_MAX_INPUT_CHARS`, `AI_MAX_CONTEXT_MESSAGES`, `AI_REQUESTS_PER_MINUTE`, `AI_MAX_CONCURRENT_REQUESTS`, `AI_OPENAI_MAX_RETRIES`, and OpenAI retries now include jittered backoff + correlation ids.
+  - Settlements charge the exact OpenAI cost: we finalize the reserved amount, bill any delta only if funds exist, otherwise refund and return HTTP 402. Tests exercise orchestrator delta handling, route behaviors (402/429/503), and limiter utilities.
 - Refactor frontend: split `frontend-web/src/App.tsx` (extract pages/components/hooks), add `src/routes/paths.ts`, and group job components under `src/components/jobs/`.
 - Consolidate backend user/settings responses (use dedicated settings schema for `/users/me/settings`)
 - Phase 2: dev reset script implemented: `temp_scripts/reset_dev_db.py` (guardrails, S3 cleanup, logs, `--yes`)
+- Stripe prepaid credits foundation hardened: `STRIPE_PRICE_MAP` pack config, `/billing/me` + `/billing/packs`, transactional webhook that updates `stripe_events` status + `credit_ledger` pack metadata. AI usage charging still to come (future chunk).
+- Credits balance & guardrails (this step):
+  - `/billing/credits/balance` now returns live balance + lifetime grant/spend totals and an `as_of` timestamp.
+  - `credit_ledger` rows include a per-user `idempotency_key`, and `spend_credits/require_credits` lock the user row, enforce “no negative balances,” and raise HTTP 402 on insufficient credits. Debug spend endpoint is available only when explicitly enabled outside prod.
+- Credits reservation layer:
+  - Added `entry_type/status/correlation_id` columns so we can post `ai_reserve`, `ai_release`, `ai_charge`, and `ai_refund` rows.
+  - `reserve_credits`, `finalize_charge`, and `refund_reservation` wrap the ledger writes with per-step idempotency keys plus DB-level locking.
+  - `/ai/demo` exercises the full reserve/finalize/refund flow until OpenAI endpoints use the same helper.
+- OpenAI usage integration:
+  - `.env.example` now includes `OPENAI_API_KEY`, `OPENAI_MODEL`, `AI_CREDITS_RESERVE_BUFFER_PCT`, `AI_COMPLETION_TOKENS_MAX`.
+  - `app/services/openai_client.py` wraps the SDK, while `app/services/ai_usage.py` handles tokenization via `tiktoken`, buffered reservations, settlement/refund, and idempotent replays backed by `ai_usage`.
+  - `/ai/chat` enforces prepaid credits (tokenize → reserve → OpenAI → finalize/refund), returns usage stats + remaining balance, and surfaces HTTP 500/502 on overruns/provider failures. Tests cover reservation math, settlement scenarios, idempotency, and the new API.

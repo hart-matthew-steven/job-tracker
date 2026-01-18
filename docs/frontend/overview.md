@@ -21,6 +21,7 @@ This document describes the frontend structure and conventions at a high level.
 - Clears Cognito sessions after a configurable period of inactivity; `AuthProvider` listens to user interaction events and logs out idle tabs (default 30 minutes, override via `VITE_IDLE_TIMEOUT_MINUTES`).
 - Hosts the marketing landing page plus `/demo/board`, a read-only board preview rendered entirely client-side so visitors can explore the UI without an account.
 - Keeps the AppShell consistent across breakpoints: the header always exposes global search + the “Create job” CTA, while the mobile drawer is reserved for navigation links. This ensures job creation never hides behind a menu on phones/tablets.
+- Surfaces prepaid AI credits at all times via the header badge. The badge reads `/billing/credits/balance`, links to `/billing`, and exposes `refresh()` so checkout/AI flows can request a fresh balance after spending or minting credits.
 
 ### Board-first workspace (UI revamp snapshot)
 
@@ -30,6 +31,20 @@ This document describes the frontend structure and conventions at a high level.
 - `BoardDrawer` loads `GET /jobs/{id}/details` (job + notes + interviews + first page of activity) and drives status changes, momentum buttons, notes, interviews, documents, and timeline pagination without flickering.
 - `CommandMenu` hits `/jobs/search` with debounced queries; selecting a card opens the drawer via `?jobId=`.
 - Smart suggestions + follow-up pills rely on server-computed `needs_follow_up` and momentum fields (`last_action_at`, `next_action_at`, `next_action_title`).
+
+### Billing and credits
+
+- `/billing` is the billing hub. It shows the latest balance, a reminder that credits gate AI usage, and the three configured Stripe packs. Pack metadata (price, credits, currency) is fetched from `/billing/packs`, while UI labels/badges/descriptions come from `src/config/billing.ts` so we can rename packs without touching the backend.
+- `VITE_BILLING_PACK_CONFIG` lets you override those display labels per environment. Example for `frontend-web/.env`:
+
+  ```bash
+  VITE_BILLING_PACK_CONFIG='{"starter":{"label":"Starter"},"pro":{"label":"Plus","badge":"Most popular"},"expert":{"label":"Max","badge":"Best value"}}'
+  ```
+
+- Each pack calls `POST /billing/stripe/checkout` with its `pack_key` and redirects to the returned Stripe URL.
+- `/billing/return` (and the legacy `/billing/stripe/success|cancelled` paths) show a success or cancel state and call `credits.refresh()` so balances stay in sync with the webhook.
+- The AI Assistant (`/ai-assistant`) consumes prepaid credits only when sending prompts. The composer now defaults to “General chat” (no template) while keeping optional presets for cover letters/thank-you/resume tailoring, and each conversation card exposes a menu (tap/click-friendly) with Rename + Delete. Rename calls `PATCH /ai/conversations/{id}`, delete calls `DELETE /ai/conversations/{id}`. The page reads the shared CreditsContext, hides the Send CTA when the balance hits zero, and surfaces a “Buy credits” pill that routes to `/billing` whenever `/ai/conversations` responds with HTTP 402. Viewing history via `GET /ai/conversations*` never spends credits; only the message POSTs subtract from the ledger. `GET /ai/config` feeds the current `AI_MAX_INPUT_CHARS` so the textarea/counter adjusts automatically when backend limits change.
+- Artifact management UI (left column) lets users pin a resume + job description per conversation. Uploads call `POST /ai/artifacts/upload-url` (with a presigned PUT), pasted text uses `POST /ai/artifacts/text`, URLs use `POST /ai/artifacts/url`, and existing artifacts can be re-pinned. The list consumes `GET /ai/artifacts/conversations/{id}` to show status (Pending/Ready/Failed), version numbers, and “View” links (presigned GETs) once the backend has extracted text.
 
 ---
 

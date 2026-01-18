@@ -11,6 +11,28 @@ Record decisions that affect structure or long-term direction.
 
 ---
 
+## 2026-01-07 — AI chat sessions + guardrails
+- Decision: Persist AI conversations in `ai_conversations`/`ai_messages`, extend `ai_usage` with conversation/message references + idempotency keys, and expose `/ai/conversations*` APIs backed by `AIConversationService`, buffered OpenAI calls, durable ledger entries, and per-user rate/concurrency limiters.
+- Rationale: Stripe already front-loads spend into prepaid credits; production AI usage requires durable history, strict idempotency, and backpressure so we never double-charge or run workloads beyond the user’s balance.
+- Consequences:
+  - Database: new Alembic migration adds `ai_conversations`, `ai_messages`, and additional columns/indexes on `ai_usage`. ORM models + Alembic env import the new tables.
+  - Services: `AIConversationService` owns context trimming, persistence, and OpenAI orchestration. `AIUsageOrchestrator` gained correlation ids, OpenAI retries with jitter, response id storage, and “charge delta only if balance allows” settlement logic.
+  - Config: `.env.example`/`Settings` include `AI_MAX_INPUT_CHARS`, `AI_MAX_CONTEXT_MESSAGES`, `AI_REQUESTS_PER_MINUTE`, `AI_MAX_CONCURRENT_REQUESTS`, `AI_OPENAI_MAX_RETRIES`, and `AI_COMPLETION_TOKENS_MAX=3000`.
+  - API: new endpoints (`POST/GET /ai/conversations`, `GET /ai/conversations/{id}`, `POST /ai/conversations/{id}/messages`) return paged messages + credit deltas; `/ai/chat` responses now include `usage_id` + `response_id`.
+  - Guardrails: custom rate/concurrency limiters raise HTTP 429, insufficient funds raise HTTP 402 (reservation refunded), OpenAI outages return HTTP 503, and every OpenAI call writes a single `ai_usage` row + ledger entry.
+
+## 2026-01-08 — DynamoDB-backed request limiting
+- Decision: Replace the SlowAPI/in-memory limiter with a DynamoDB-backed fixed-window limiter keyed by `pk=user:{user_id}|ip:{address}` and `sk=route:{route_key}:window:{seconds}`, storing `window_start`, `count`, and `expires_at` (TTL).
+- Rationale: App Runner can scale horizontally, so per-process state was inaccurate and hard to reason about. DynamoDB provides conditional updates + TTL for pennies, eliminating the need for Redis/ElastiCache.
+- Consequences:
+  - Added env knobs `RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, `RATE_LIMIT_DEFAULT_WINDOW_SECONDS`, `RATE_LIMIT_DEFAULT_MAX_REQUESTS`, `AI_RATE_LIMIT_WINDOW_SECONDS`, `AI_RATE_LIMIT_MAX_REQUESTS`.
+  - New FastAPI dependency `require_rate_limit(...)` now guards `/ai/*`, `/auth/cognito/*`, and document presign uploads, returning HTTP 429 with `Retry-After` when limits are exceeded.
+  - Tests use `botocore.stub.Stubber` to simulate `UpdateItem` success/ConditionalCheckFailed flows and ensure API routes emit 429 when the limiter fires.
+
+---
+
+---
+
 ## 2025-12-18 — Repo hygiene boundaries (docs/logs/temp scripts)
 - Decision: Separate documentation, outputs/logs, and one-off scripts into top-level folders:
   - `docs/` for documentation
@@ -414,3 +436,55 @@ Record decisions that affect structure or long-term direction.
   - Landing page CTAs now point to signup or the demo board; hero text references “enterprise-grade clarity” instead of Jira.
   - Frontend includes `DemoBoardPage.tsx`, which renders seeded cards entirely client-side for unauthenticated visitors.
   - Documentation highlights the demo route so GTM/support can link to it directly.
+
+---
+
+## 2026-01-06 — Credits balance + spend guardrails
+- Decision: keep the ledger as the source of truth (no cached balance column) and add `spend_credits/require_credits` helpers that lock the user row, recompute the live balance, and insert negative rows with per-user `idempotency_key`s.
+- Rationale:
+  - Ledger-only math keeps audit trails intact and makes retries/idempotency trivial—credits are money, so every mutation must be explainable.
+  - Locking the user row + re-reading the ledger avoids “double spend” races when multiple AI calls arrive at the same time.
+  - Surfacing `balance`, `lifetime_granted`, and `lifetime_spent` gives the UI and customer support the data they need to explain charges/refunds.
+- Consequences:
+  - `credit_ledger` gained `idempotency_key` and new metadata fields are required on every insert.
+  - `GET /billing/credits/balance` and `GET /billing/me` now pull directly from the ledger and include audit-friendly fields.
+  - A dev-only `/billing/credits/debug/spend` endpoint exists for local smoke tests; production stays disabled unless explicitly enabled via `ENABLE_BILLING_DEBUG_ENDPOINT`.
+
+---
+
+## 2026-01-06 — Reservation + finalize/refund workflow
+- Decision: implement reservation/finalize/refund primitives directly on the ledger with `entry_type`, `status`, `correlation_id`, and per-step idempotency keys, plus a dev-only `/ai/demo` endpoint to exercise the flow before OpenAI lands.
+- Rationale:
+  - Holding credits up front avoids race conditions when multiple AI calls fire concurrently and guarantees we can refund if the downstream call fails.
+  - Ledger immutability (reserve row + release row + charge row) keeps accounting auditable while still letting us reconcile actual vs. estimated usage.
+  - A dedicated demo endpoint makes it easy to test the happy path and failure path locally without wiring up OpenAI yet.
+- Consequences:
+  - `credit_ledger` rows now include metadata needed to tie Stripe grants, AI reserves, releases, charges, and refunds together.
+  - Service-layer helpers (`reserve_credits`, `finalize_charge`, `refund_reservation`) are the contract future AI endpoints must use before/after invoking OpenAI.
+  - `/ai/demo` shows how clients must include `idempotency_key`, estimated cost, and optional `actual_cost_credits` to remain idempotent.
+
+---
+
+## 2026-01-05 — Stripe prepaid credits hardening
+- Decision: Gate checkout by `pack_key`, store `stripe_events` with `status`/`error` for idempotency, and mint credits exclusively from the webhook.
+- Rationale:
+  - Clients should not choose arbitrary Stripe prices or credit amounts; configuration lives in `STRIPE_PRICE_MAP` so ops can tweak packs without redeploying.
+  - Stripe webhooks can be retried, delivered out of order, or partially fail. Persisting every payload plus status/error text gives observability and lets us safely short-circuit duplicates.
+  - Minting credits inside the webhook transaction (with `(user_id, source_ref)` uniqueness) keeps the DB as the source of truth as we layer on future AI usage debits.
+- Consequences:
+  - `/billing/stripe/checkout` now accepts `{pack_key}` and returns the pack/credits, `/billing/packs` lists configured packs, and `/billing/me` exposes balances + ledger snippets for the SPA.
+  - `credit_ledger` stores `pack_key`, `stripe_checkout_session_id`, and `stripe_payment_intent_id` so reconciliations/debugging are trivial.
+  - `stripe_events` gained `status`, `error_message`, and `processed_at`. The handler inserts a pending row, processes the event, and updates status to `processed|skipped`. Failures mark the row `failed` and return HTTP 500 so Stripe retries.
+
+---
+
+## 2026-01-07 — OpenAI usage integration
+- Decision: ship `/ai/chat` backed by a dedicated OpenAI client + AI usage orchestrator that estimates tokens, over-reserves credits with a configurable buffer, performs the OpenAI call, and settles/refunds atomically.
+- Rationale:
+  - Prepaid credits must remain the single source of truth. Reserving before calling OpenAI and finalizing afterward prevents negative balances and gives an auditable trail (`ai_reserve` → `ai_release` → `ai_charge` / `ai_refund`).
+  - Over-reserving with `AI_CREDITS_RESERVE_BUFFER_PCT` fails safely—if OpenAI usage exceeds the buffer the entire hold is refunded and the client retries instead of silently eating the delta.
+  - Idempotent request ids keep OpenAI costs predictable: retries reuse the existing ledger rows and cached response instead of generating duplicate completions.
+- Consequences:
+  - `.env.example` now documents `OPENAI_API_KEY`, `OPENAI_MODEL`, and `AI_CREDITS_RESERVE_BUFFER_PCT`; `app/core/config.py` loads them and `_validate_prod` requires the API key.
+  - New services: `app/services/openai_client.py` (SDK wrapper) and `app/services/ai_usage.py` (tokenization via `tiktoken`, estimation, reservation, settlement, `ai_usage` persistence).
+  - New route: `POST /ai/chat` (with request_id + messages). It responds with the completion text, usage stats, credits charged/refunded, and the remaining balance; HTTP 402/500/502 cover insufficiency, reservation overruns, and upstream failures respectively.

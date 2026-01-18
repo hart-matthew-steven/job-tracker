@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { KanbanSquare, ListChecks, BarChart3, LogOut, Search, Menu, Plus } from "lucide-react";
+import { KanbanSquare, BarChart3, LogOut, Search, Menu, Plus, Sparkles } from "lucide-react";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { CurrentUserProvider } from "../../context/CurrentUserContext";
+import { CreditsProvider } from "../../context/CreditsContext";
 import { ROUTES } from "../../routes/paths";
 import type { ActivityMetrics, UserMeOut } from "../../types/api";
 import { getActivityPulse } from "../../api";
 import { CommandMenu } from "../search/CommandMenu";
+import CreditsBadge from "./CreditsBadge";
 
 function cx(...parts: Array<string | false | null | undefined>) {
     return parts.filter(Boolean).join(" ");
@@ -92,6 +94,14 @@ function AccountMenu({ onLogout, user, isStub }: AccountMenuProps) {
                             Settings
                         </NavLink>
                         <NavLink
+                            to={ROUTES.billing}
+                            onClick={() => setOpen(false)}
+                            role="menuitem"
+                            className="block px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900/60"
+                        >
+                            Billing
+                        </NavLink>
+                        <NavLink
                             to={ROUTES.changePassword}
                             onClick={() => setOpen(false)}
                             role="menuitem"
@@ -123,6 +133,7 @@ function AccountMenu({ onLogout, user, isStub }: AccountMenuProps) {
 const NAV_ITEMS = [
     { to: ROUTES.board, label: "Board", icon: KanbanSquare },
     { to: ROUTES.insights, label: "Insights", icon: BarChart3 },
+    { to: ROUTES.aiAssistant, label: "AI Assistant", icon: Sparkles },
 ];
 
 export type ShellContext = {
@@ -198,7 +209,8 @@ export default function AppShell({ onLogout }: Props) {
     const homeTarget = currentUser.user ? ROUTES.board : ROUTES.home;
 
     return (
-        <CurrentUserProvider value={currentUser}>
+    <CurrentUserProvider value={currentUser}>
+        <CreditsProvider>
             <div className="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
                 <aside className="hidden w-20 flex-col border-r border-slate-200 bg-white/80 pt-6 dark:border-slate-800 dark:bg-slate-950 md:flex">
                     <div className="flex flex-col items-center gap-8">
@@ -268,6 +280,7 @@ export default function AppShell({ onLogout }: Props) {
                                         <kbd className="ml-auto rounded border border-slate-300 px-1 text-xs">⌘K</kbd>
                                     </button>
                                 </div>
+                                <CreditsBadge className="hidden md:inline-flex" />
                                 <div className="flex items-center gap-2 md:hidden">
                                     <button
                                         type="button"
@@ -277,6 +290,7 @@ export default function AppShell({ onLogout }: Props) {
                                         <Search size={16} aria-hidden="true" />
                                         <span className="truncate">Search…</span>
                                     </button>
+                                    <CreditsBadge />
                                     <button
                                         type="button"
                                         onClick={handleGlobalCreateJob}
@@ -339,6 +353,7 @@ export default function AppShell({ onLogout }: Props) {
                     nav(`${ROUTES.board}?jobId=${jobId}`);
                 }}
             />
+        </CreditsProvider>
         </CurrentUserProvider>
     );
 }
