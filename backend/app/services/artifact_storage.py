@@ -9,7 +9,9 @@ import boto3
 from app.core.config import settings
 
 
-_s3 = boto3.client("s3", region_name=settings.AWS_REGION)
+def _client():
+    region = settings.AWS_REGION or None
+    return boto3.client("s3", region_name=region)
 _SANITIZE_RE = re.compile(r"[^A-Za-z0-9_.-]")
 
 
@@ -24,10 +26,11 @@ def build_s3_key(user_id: int, artifact_id: int, filename: str) -> str:
 
 
 def presign_upload(key: str, content_type: str | None) -> str:
+    s3 = _client()
     params: dict[str, str] = {"Bucket": _bucket(), "Key": key}
     if content_type:
         params["ContentType"] = content_type
-    return _s3.generate_presigned_url(
+    return s3.generate_presigned_url(
         ClientMethod="put_object",
         Params=params,
         ExpiresIn=600,
@@ -35,7 +38,8 @@ def presign_upload(key: str, content_type: str | None) -> str:
 
 
 def presign_view(key: str) -> str:
-    return _s3.generate_presigned_url(
+    s3 = _client()
+    return s3.generate_presigned_url(
         ClientMethod="get_object",
         Params={"Bucket": _bucket(), "Key": key},
         ExpiresIn=600,
@@ -45,9 +49,11 @@ def presign_view(key: str) -> str:
 def download_to_tempfile(key: str) -> str:
     tmp = tempfile.NamedTemporaryFile(delete=False)
     tmp.close()
-    _s3.download_file(_bucket(), key, tmp.name)
+    s3 = _client()
+    s3.download_file(_bucket(), key, tmp.name)
     return tmp.name
 
 
 def delete(key: str) -> None:
-    _s3.delete_object(Bucket=_bucket(), Key=key)
+    s3 = _client()
+    s3.delete_object(Bucket=_bucket(), Key=key)

@@ -13,7 +13,8 @@ class PresignUploadResult:
 
 
 def _client():
-    return boto3.client("s3", region_name=settings.AWS_REGION)
+    region = settings.AWS_REGION or None
+    return boto3.client("s3", region_name=region)
 
 
 def build_s3_key(job_id: int, doc_type: str, original_filename: str) -> str:
