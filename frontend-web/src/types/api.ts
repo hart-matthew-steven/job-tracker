@@ -242,3 +242,72 @@ export type StripeCheckoutSessionOut = {
   credits_granted: number;
 };
 
+
+// -------- AI Assistant --------
+export type AiPurpose = "general" | "cover_letter" | "thank_you" | "resume_tailoring";
+
+export type AiConversationSummary = {
+  id: number;
+  title?: string | null;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+};
+
+export type AiConversationListResponse = {
+  conversations: AiConversationSummary[];
+  next_offset?: number | null;
+};
+
+export type AiMessage = {
+  id: number;
+  role: string;
+  content_text: string;
+  created_at: string;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens?: number | null;
+  credits_charged?: number | null;
+  model?: string | null;
+  balance_remaining_cents?: number | null;
+};
+
+export type AiConversationDetail = {
+  id: number;
+  title?: string | null;
+  created_at: string;
+  updated_at: string;
+  messages: AiMessage[];
+  next_offset?: number | null;
+};
+
+export type AiConversationCreateIn = {
+  title?: string | null;
+  message?: string | null;
+  purpose?: AiPurpose | null;
+};
+
+export type AiConversationMessageIn = {
+  content: string;
+  request_id?: string | null;
+  purpose?: AiPurpose | null;
+};
+
+export type AiConversationMessageResponse = {
+  conversation_id: number;
+  user_message: AiMessage;
+  assistant_message: AiMessage;
+  credits_used_cents: number;
+  credits_refunded_cents: number;
+  credits_reserved_cents: number;
+  credits_remaining_cents: number;
+  credits_remaining_dollars: string;
+};
+
+export type AiConfig = {
+  max_input_chars: number;
+};
+
+export type AiConversationUpdateIn = {
+  title?: string | null;
+};

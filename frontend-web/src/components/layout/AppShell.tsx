@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { KanbanSquare, ListChecks, BarChart3, LogOut, Search, Menu, Plus } from "lucide-react";
+import { KanbanSquare, BarChart3, LogOut, Search, Menu, Plus, Sparkles } from "lucide-react";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { CurrentUserProvider } from "../../context/CurrentUserContext";
 import { CreditsProvider } from "../../context/CreditsContext";
@@ -133,6 +133,7 @@ function AccountMenu({ onLogout, user, isStub }: AccountMenuProps) {
 const NAV_ITEMS = [
     { to: ROUTES.board, label: "Board", icon: KanbanSquare },
     { to: ROUTES.insights, label: "Insights", icon: BarChart3 },
+    { to: ROUTES.aiAssistant, label: "AI Assistant", icon: Sparkles },
 ];
 
 export type ShellContext = {

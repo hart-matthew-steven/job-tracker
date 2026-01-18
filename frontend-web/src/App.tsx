@@ -7,6 +7,7 @@ import JobsPage from "./pages/JobsPage";
 import BoardPage from "./pages/BoardPage";
 import BillingPage from "./pages/billing/BillingPage";
 import BillingReturnPage from "./pages/billing/BillingReturnPage";
+import AIAssistantPage from "./pages/ai/AIAssistantPage";
 
 import { useAuth } from "./auth/AuthProvider";
 import { subscribeToEmailVerificationRequired } from "./api";
@@ -87,6 +88,7 @@ export default function App() {
           <Route path={ROUTES.board} element={<BoardPage />} />
           <Route path={ROUTES.jobs} element={<JobsPage />} />
           <Route path={ROUTES.insights} element={<DashboardPage />} />
+          <Route path={ROUTES.aiAssistant} element={<AIAssistantPage />} />
           <Route path={ROUTES.billing} element={<BillingPage />} />
           <Route path={ROUTES.billingReturn} element={<BillingReturnPage />} />
           <Route path={ROUTES.billingReturnSuccessLegacy} element={<BillingReturnPage />} />

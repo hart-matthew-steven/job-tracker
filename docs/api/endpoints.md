@@ -182,6 +182,11 @@ Guidelines:
   - Response: `{ "request_id": "chat-123", "model": "gpt-4.1-mini", "response_text": "...", "prompt_tokens": 900, "completion_tokens": 350, "credits_used_cents": 240, "credits_refunded_cents": 60, "credits_reserved_cents": 300, "credits_remaining_cents": 4700, "credits_remaining_dollars": "47.00" }`
   - Notes: The backend tokenizes prompts with OpenAI’s tokenizer (`tiktoken`), budgets `AI_COMPLETION_TOKENS_MAX` completion tokens, applies `AI_CREDITS_RESERVE_BUFFER_PCT` (currently 25%), reserves *more* credits than needed, calls OpenAI, then finalizes the reservation with the actual cost. If the OpenAI response exceeds the reservation the entire reservation is refunded and the API returns HTTP 500 so the client can retry with a fresh request id. Passing the same `request_id` makes the call idempotent—success responses are replayed without hitting OpenAI again. Exceeding `AI_RATE_LIMIT_MAX_REQUESTS` within `AI_RATE_LIMIT_WINDOW_SECONDS` returns HTTP 429 with a `Retry-After` header.
 
+- `GET /ai/config`
+  - Auth: Bearer
+  - Response: `{ "max_input_chars": 12000 }`
+  - Notes: Returns the current `AI_MAX_INPUT_CHARS` limit so the frontend can size text areas and counters dynamically without redeploying whenever the backend configuration changes.
+
 ### Conversations (`/ai/conversations*`)
 
 - `POST /ai/conversations`
@@ -205,6 +210,53 @@ Guidelines:
   - Body: `{ "content": "Draft a thank-you email" , "request_id": "msg-123" }`
   - Response: `{ conversation_id, user_message, assistant_message, credits_used_cents, credits_reserved_cents, credits_remaining_* }`
   - Notes: Appends a user message, builds a trimmed history (max `AI_MAX_CONTEXT_MESSAGES`), reserves credits, calls OpenAI, stores the assistant reply, and debits the final cost. Each `request_id` is idempotent. Returns 402 when the user lacks credits, 429 when the per-minute/concurrency guardrails fire, and 503 when OpenAI is temporarily unavailable.
+
+- `PATCH /ai/conversations/{conversation_id}`
+  - Auth: Bearer
+  - Body: `{ "title": "Weekly sync prep" }` (omit or send `null` to clear the custom title)
+  - Response: `ConversationDetailResponse`
+  - Notes: Renames the conversation (or clears the title) and returns the updated metadata + first page of messages. Changing the title doesn’t spend credits.
+
+- `DELETE /ai/conversations/{conversation_id}`
+  - Auth: Bearer
+  - Response: HTTP 204
+  - Notes: Permanently deletes the conversation and all associated messages for the authenticated user. Credits/usage rows remain for audit but are detached via the existing foreign-key cascade.
+
+### AI Artifacts
+
+- `POST /ai/artifacts/upload-url`
+  - Auth: Bearer
+  - Body: `{ "conversation_id": 123, "artifact_type": "resume", "filename": "resume.docx", "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }`
+  - Response: `{ "artifact_id": 45, "upload_url": "https://..." }`
+  - Notes: Creates a placeholder artifact record, pins it to the given conversation/role, and returns a short-lived presigned PUT URL for S3. After the client uploads the file it must call `/ai/artifacts/{id}/complete-upload` to kick off background processing.
+
+- `POST /ai/artifacts/{artifact_id}/complete-upload`
+  - Auth: Bearer
+  - Response: `{ "artifact_id": 45, "status": "pending" }`
+  - Notes: Marks the upload as ready for processing and enqueues the Celery worker to extract text from the document. If the artifact wasn’t created via the upload flow, the endpoint returns 400.
+
+- `POST /ai/artifacts/text`
+  - Auth: Bearer
+  - Body: `{ "conversation_id": 123, "artifact_type": "resume", "content": "Plain-text resume..." }`
+  - Response: `{ "artifact_id": 46, "status": "ready" }`
+  - Notes: Stores pasted text directly without background processing. Useful for quick iterations or when a user doesn’t have a file handy.
+
+- `POST /ai/artifacts/url`
+  - Auth: Bearer
+  - Body: `{ "conversation_id": 123, "artifact_type": "job_description", "url": "https://jobs.example.com/posting/abc" }`
+  - Response: `{ "artifact_id": 47, "status": "pending" }`
+  - Notes: Enqueues a Celery scrape job that fetches the page, runs it through readability/BeautifulSoup, and stores the cleaned text. On authentication/anti-bot failures the artifact will land in `failed` with a human-readable reason so the UI can prompt for manual paste.
+
+- `POST /ai/artifacts/{artifact_id}/pin`
+  - Auth: Bearer
+  - Body: `{ "conversation_id": 123 }`
+  - Response: `{ "artifact_id": 45, "status": "pending" | "ready" | "failed" }`
+  - Notes: Re-pins an existing artifact (e.g., reuse the same resume across multiple conversations). The unique `(conversation, role)` constraint ensures at most one active resume + JD per thread.
+
+- `GET /ai/artifacts/conversations/{conversation_id}`
+  - Auth: Bearer
+  - Response: `{ "artifacts": [ { "artifact_id": 45, "artifact_type": "resume", "version_number": 3, "status": "ready", "source_type": "upload", "created_at": "...", "failure_reason": null, "view_url": "https://..." }, ... ] }`
+  - Notes: Returns the currently pinned artifacts (resume, job description, notes) along with their version history metadata and an optional presigned GET URL if the artifact has a binary backing file.
 
 ---
 

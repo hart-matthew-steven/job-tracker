@@ -4,6 +4,7 @@ from sqlalchemy import Boolean, Column, DateTime, Integer, String, func, JSON
 from sqlalchemy.orm import relationship
 
 from app.core.base import Base
+from app.models.artifact import AIArtifact
 
 
 class User(Base):
@@ -56,6 +57,11 @@ class User(Base):
 
     ai_conversations = relationship(
         "AIConversation",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    artifacts = relationship(
+        "AIArtifact",
         back_populates="user",
         cascade="all, delete-orphan",
     )

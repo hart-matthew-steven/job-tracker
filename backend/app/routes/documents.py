@@ -109,15 +109,6 @@ def create_document_presign_upload(
     db.commit()
     db.refresh(doc)
 
-    # Track that a document was created (pending upload)
-    log_job_activity(
-        db,
-        job_id=job.id,
-        user_id=user.id,
-        type="document_added",
-        message="Document added",
-        data={"document_id": doc.id, "doc_type": doc_type, "filename": filename},
-    )
     db.commit()
 
     return {"document": doc, "upload_url": result.upload_url}

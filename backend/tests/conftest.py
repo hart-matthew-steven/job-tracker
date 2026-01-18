@@ -1,14 +1,15 @@
 from contextlib import contextmanager
+import importlib
+import tempfile
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-import importlib
 
-from app.core.base import Base
 from app.core import config as app_config
+from app.core.base import Base
 from app.core.config import StripeCreditPack
 from app.services import rate_limiter as rate_limiter_service
 
@@ -24,6 +25,8 @@ from app.models.saved_view import SavedView  # noqa: F401
 from app.models.email_verification_code import EmailVerificationCode  # noqa: F401
 from app.models.credit import CreditLedger, AIUsage  # noqa: F401
 from app.models.stripe_event import StripeEvent  # noqa: F401
+from app.models.ai import AIConversation, AIMessage  # noqa: F401
+from app.models.artifact import AIArtifact  # noqa: F401
 
 from app.core.database import get_db
 
@@ -60,6 +63,7 @@ def _stub_s3(monkeypatch):
     """
     Stub S3 client used by app.services.s3 so tests never require AWS creds/network.
     """
+    from app.services import artifact_storage as artifact_storage_service
     from app.services import s3 as s3_service
 
     class FakeS3Client:
@@ -76,6 +80,30 @@ def _stub_s3(monkeypatch):
     monkeypatch.setattr(s3_service, "_client", lambda: FakeS3Client())
     app_config.settings.S3_BUCKET_NAME = app_config.settings.S3_BUCKET_NAME or "test-bucket"
     app_config.settings.AWS_REGION = app_config.settings.AWS_REGION or "us-east-1"
+
+    def fake_presign_upload(key: str, content_type: str | None) -> str:
+        return f"https://example.invalid/upload/{key}"
+
+    def fake_presign_view(key: str) -> str:
+        return f"https://example.invalid/view/{key}"
+
+    def fake_download(key: str) -> str:
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        tmp.write(b"sample")
+        tmp.flush()
+        tmp.close()
+        return tmp.name
+
+    def fake_delete(key: str) -> None:
+        return None
+
+    monkeypatch.setattr(artifact_storage_service, "presign_upload", fake_presign_upload)
+    monkeypatch.setattr(artifact_storage_service, "presign_view", fake_presign_view)
+    monkeypatch.setattr(artifact_storage_service, "download_to_tempfile", fake_download)
+    monkeypatch.setattr(artifact_storage_service, "delete", fake_delete)
+    app_config.settings.AI_ARTIFACTS_BUCKET = app_config.settings.AI_ARTIFACTS_BUCKET or "test-artifacts"
+    app_config.settings.AI_ARTIFACTS_S3_PREFIX = app_config.settings.AI_ARTIFACTS_S3_PREFIX or "users"
+    app_config.settings.S3_BUCKET_NAME = app_config.settings.S3_BUCKET_NAME or "test-bucket"
 
 
 @pytest.fixture(autouse=True)

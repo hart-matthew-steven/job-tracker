@@ -404,6 +404,10 @@ curl -s -X POST http://localhost:8000/ai/chat \
   - `GET /ai/conversations` – lists the authenticated user’s conversations (paged by `limit`/`offset`).
   - `GET /ai/conversations/{id}` – returns metadata + paged messages (oldest-first).
   - `POST /ai/conversations/{id}/messages` – appends a user message, runs the OpenAI workflow, persists the assistant reply, and returns `{user_message, assistant_message, credits_used_cents, credits_refunded_cents, credits_reserved_cents, credits_remaining_*}`.
+  - `PATCH /ai/conversations/{id}` – updates the conversation title (pass `null`/omit to clear it) and returns the refreshed thread metadata.
+- `GET /ai/config` – returns `{ "max_input_chars": AI_MAX_INPUT_CHARS }` so the SPA can size its textarea/counter dynamically whenever the backend budget changes.
+- `ai_messages.balance_remaining_cents` stores the user’s post-response balance so the SPA can show “Remaining credits” per assistant bubble alongside the existing token/charge metadata. Both `POST /ai/conversations` (when `message` is provided) and `POST /ai/conversations/{id}/messages` now accept an optional `purpose` (`cover_letter`, `thank_you`, `resume_tailoring`); the service injects the relevant system prompt without polluting the stored transcript.
+- Frontend entry point: `/ai-assistant` adds a primary nav item, renders the conversation list + chat thread full-screen, and uses the shared CreditsContext to disable the composer when the balance hits zero. The composer now defaults to “General chat” while keeping optional presets for cover letters / thank-you letters / resume tailoring. Each conversation card exposes an action menu (rename + delete) that works on desktop and mobile. HTTP 402 responses show a friendly banner with a “Buy credits” CTA that routes to `/billing`; `GET /ai/conversations*` history calls never spend credits.
 - Guardrails: per-user rate limiting (`AI_REQUESTS_PER_MINUTE`), concurrency limiting (`AI_MAX_CONCURRENT_REQUESTS`), context trimming (`AI_MAX_CONTEXT_MESSAGES`), max user input (`AI_MAX_INPUT_CHARS`), retry budget (`AI_OPENAI_MAX_RETRIES`), and a higher completion cap (`AI_COMPLETION_TOKENS_MAX=3000`). All are documented in `.env.example` and parsed in `app/core/config.py`.
 - Settlement logic now handles overruns safely: if actual cost exceeds the reservation we finalize the reserved amount, attempt to spend the delta via `CreditsService.spend_credits`, and refund/return HTTP 402 when the user lacks funds—no negative balances or silent absorption.
 - Example conversation loop (after seeding credits):
@@ -427,6 +431,35 @@ curl -s -X POST http://localhost:8000/ai/conversations/42/messages \
   -H "Content-Type: application/json" \
   -d '{"content":"Draft a thank-you email for Acme"}' | jq
 ```
+
+### AI artifacts & background processing
+
+- Resume / job-description context is managed through first-class “artifacts.” The backend exposes:
+  - `POST /ai/artifacts/upload-url` → presigned PUT for S3 + artifact placeholder
+  - `POST /ai/artifacts/{id}/complete-upload` → enqueues extraction (docx/pdf)
+  - `POST /ai/artifacts/text` → stores pasted resumes/JDs immediately
+  - `POST /ai/artifacts/url` → scrapes a JD webpage via readability + BeautifulSoup
+  - `POST /ai/artifacts/{id}/pin` → reuse an existing artifact in another conversation
+  - `GET /ai/artifacts/conversations/{id}` → current artifacts per role (resume, job_description, note) including status, version numbers, and presigned view URLs
+- Storage & queue configuration:
+  - `AI_ARTIFACTS_BUCKET` — dedicated S3 bucket for AI uploads
+  - `AI_ARTIFACTS_S3_PREFIX` — path prefix (default `users/`)
+  - `AI_ARTIFACTS_SQS_QUEUE_URL` — SQS queue consumed by the Celery worker
+  - `MAX_ARTIFACT_VERSIONS` — per-user retention cap (older uploads trimmed automatically)
+- Celery worker:
+  - Lives in the same repo (`app/celery_app.py`, tasks under `app/tasks/artifacts.py`)
+  - Broker is SQS (`broker_url=sqs://`, predefined queue = `artifact-tasks`)
+  - Tasks use `python-docx`, `pdfplumber`, `pypdfium2`, and `readability-lxml` to normalize text before saving it back to the artifact record.
+  - Local dev can run the worker with:
+
+    ```bash
+    cd backend
+    ./venv/bin/celery -A app.tasks.artifacts worker --loglevel=info
+    ```
+
+    (Set `AI_ARTIFACTS_SQS_QUEUE_URL` + AWS creds, or leave it empty to fall back to in-memory execution for smoke tests.)
+- App Runner deploys a **second service** for the worker (same image, command `celery -A app.tasks.artifacts worker --loglevel=info`). Give it the same IAM role permissions as the API (S3 read/write, SQS receive/delete).
+- Frontend artifacts panel consumes the `/ai/artifacts` endpoints to show the resume/JD currently “in context,” display processing states (Pending / Ready / Failed with reason), and offer “Upload / Paste / Link” affordances for both roles.
 
 ### CI/CD pipelines
 

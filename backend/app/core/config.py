@@ -1,9 +1,73 @@
 # app/core/config.py
+import base64
+import json
 import os
 from dataclasses import dataclass
+from typing import Any, Mapping
 from urllib.parse import quote_plus
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # type: ignore[import]
+
+
+def _hydrate_from_mapping(values: Mapping[str, Any]) -> None:
+    """
+    Add key/value pairs to os.environ if the key is not already set.
+    Values are coerced to strings because environ only stores text.
+    """
+    for key, value in values.items():
+        if key in os.environ:
+            continue
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            os.environ[key] = "true" if value else "false"
+        else:
+            os.environ[key] = str(value)
+
+
+def _parse_bundle(raw: str, *, source: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{source} must be valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError(f"{source} must be a JSON object of key/value pairs")
+    return parsed
+
+
+def _hydrate_json_bundle(var_name: str) -> None:
+    blob = os.getenv(var_name)
+    if not blob:
+        return
+    data = _parse_bundle(blob, source=var_name)
+    _hydrate_from_mapping(data)
+
+
+def _hydrate_secret_bundle(var_name: str) -> None:
+    arn = os.getenv(var_name)
+    if not arn:
+        return
+    import boto3  # type: ignore[import]
+    from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import]
+
+    region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or None
+    client = boto3.client("secretsmanager", region_name=region)
+    try:
+        resp = client.get_secret_value(SecretId=arn)
+    except (BotoCoreError, ClientError) as exc:
+        raise RuntimeError(f"Failed to load secret bundle from {var_name}: {exc}") from exc
+
+    raw = resp.get("SecretString")
+    if raw is None:
+        binary = resp.get("SecretBinary")
+        if binary is None:
+            raise RuntimeError(f"Secret {arn} did not contain SecretString or SecretBinary")
+        if isinstance(binary, str):
+            binary = binary.encode("utf-8")
+        raw = base64.b64decode(binary).decode("utf-8")
+
+    data = _parse_bundle(raw, source=var_name)
+    _hydrate_from_mapping(data)
 
 
 def str_to_bool(value: str | None, default: bool = False) -> bool:
@@ -38,11 +102,14 @@ class StripeCreditPack:
 
 class Settings:
     def __init__(self) -> None:
-        # Only load .env for local/dev. In App Runner, env vars come from the service config.
+        # Load .env first (local dev convenience)
+        load_dotenv()
+
+        # Allow bundling many settings into a single secret.
+        _hydrate_secret_bundle("SETTINGS_BUNDLE_SECRET_ARN")
+
+        # Now resolve ENV after potential overrides.
         self.ENV = os.getenv("ENV", "dev").strip().lower()  # dev | prod
-        if self.ENV != "prod":
-            # Load .env only for non-prod so prod can't be accidentally influenced by local files.
-            load_dotenv()
 
         # ----------------------------
         # Database
@@ -129,6 +196,10 @@ class Settings:
         self.AWS_REGION = os.getenv("AWS_REGION", "")
         self.S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "")
         self.S3_PREFIX = os.getenv("S3_PREFIX", "")
+        self.AI_ARTIFACTS_BUCKET = os.getenv("AI_ARTIFACTS_BUCKET", "").strip()
+        self.AI_ARTIFACTS_S3_PREFIX = os.getenv("AI_ARTIFACTS_S3_PREFIX", "users/").strip() or "users/"
+        self.AI_ARTIFACTS_SQS_QUEUE_URL = os.getenv("AI_ARTIFACTS_SQS_QUEUE_URL", "").strip()
+        self.MAX_ARTIFACT_VERSIONS = max(1, int(os.getenv("MAX_ARTIFACT_VERSIONS", "5")))
 
         # ----------------------------
         # Stripe billing
@@ -202,6 +273,11 @@ class Settings:
         cors_joined = ",".join(self.CORS_ORIGINS)
         if "localhost" in cors_joined or "127.0.0.1" in cors_joined:
             raise RuntimeError("CORS_ORIGINS contains localhost/dev origins in prod")
+
+        if not self.AI_ARTIFACTS_BUCKET:
+            missing.append("AI_ARTIFACTS_BUCKET")
+        if not self.AI_ARTIFACTS_SQS_QUEUE_URL:
+            missing.append("AI_ARTIFACTS_SQS_QUEUE_URL")
 
         if missing:
             raise RuntimeError(f"Missing required prod env vars: {', '.join(missing)}")

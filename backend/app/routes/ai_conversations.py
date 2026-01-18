@@ -18,6 +18,7 @@ from app.schemas.ai_conversation import (
     ConversationListResponse,
     ConversationMessageResponse,
     ConversationSummary,
+    ConversationUpdateRequest,
     MessageOut,
     MessageCreateRequest,
 )
@@ -75,12 +76,14 @@ def create_conversation(
                     title=payload.title,
                     first_message=payload.message,
                     correlation_id=correlation_id,
+                    purpose=payload.purpose,
                 )
         else:
             conversation, _ = service.create_conversation(
                 title=payload.title,
                 first_message=None,
                 correlation_id=correlation_id,
+                purpose=payload.purpose,
             )
     except ConcurrencyLimitExceededError:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail="Another AI request is already running.") from None
@@ -177,6 +180,7 @@ def create_message(
                 content=payload.content,
                 correlation_id=correlation_id,
                 request_id=payload.request_id,
+                purpose=payload.purpose,
             )
     except ConversationNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Conversation not found") from None
@@ -228,5 +232,48 @@ def _message_to_schema(message: AIMessage) -> MessageOut:
         total_tokens=message.total_tokens,
         credits_charged=message.credits_charged,
         model=message.model,
+        balance_remaining_cents=message.balance_remaining_cents,
     )
 
+
+@router.delete(
+    "/{conversation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[_ai_rate_limit("ai_conversations_delete")],
+)
+def delete_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    orchestrator: AIUsageOrchestrator = Depends(get_ai_orchestrator),
+) -> None:
+    service = AIConversationService(db, user, orchestrator=orchestrator)
+    try:
+        service.delete_conversation(conversation_id)
+    except ConversationNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Conversation not found") from None
+
+
+@router.patch(
+    "/{conversation_id}",
+    response_model=ConversationDetailResponse,
+    dependencies=[_ai_rate_limit("ai_conversations_update")],
+)
+def update_conversation(
+    conversation_id: int,
+    payload: ConversationUpdateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    orchestrator: AIUsageOrchestrator = Depends(get_ai_orchestrator),
+) -> ConversationDetailResponse:
+    service = AIConversationService(db, user, orchestrator=orchestrator)
+    try:
+        conversation = service.rename_conversation(conversation_id, payload.title)
+    except ConversationNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Conversation not found") from None
+    messages, next_offset = service.get_messages(
+        conversation,
+        limit=min(settings.AI_MAX_CONTEXT_MESSAGES, 50),
+        offset=0,
+    )
+    return _serialize_conversation(conversation, messages, next_offset)

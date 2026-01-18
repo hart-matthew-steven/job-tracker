@@ -7,13 +7,24 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.config import settings
 from app.models.ai import AIConversation, AIMessage
 from app.models.credit import AIUsage
 from app.models.user import User
 from app.services.ai_usage import AIChatResult, AIUsageOrchestrator
 from app.services.credits import InsufficientCreditsError
 from app.services.openai_client import ChatMessage
+
+PURPOSE_PROMPTS = {
+    "cover_letter": (
+        "You help job seekers craft persuasive, concise cover letters that match the role, emphasize results, and keep a professional tone."
+    ),
+    "thank_you": (
+        "You write thoughtful, specific thank you notes after interviews. Reflect on the conversation, reiterate fit, and keep it warm yet concise."
+    ),
+    "resume_tailoring": (
+        "You tailor resume bullet points using only the provided text. Highlight quantifiable impact, align to the target role, and avoid fabricating data."
+    ),
+}
 
 
 class ConversationNotFoundError(Exception):
@@ -39,6 +50,7 @@ class AIConversationService:
         first_message: str | None,
         correlation_id: str,
         request_id: str | None = None,
+        purpose: str | None = None,
     ) -> tuple[AIConversation, list[AIMessage]]:
         conversation = AIConversation(
             user_id=self.user.id,
@@ -56,6 +68,7 @@ class AIConversationService:
                 content=first_message,
                 correlation_id=correlation_id,
                 request_id=request_id,
+                purpose=purpose,
             )
             messages = [user_msg, assistant_msg]
         else:
@@ -111,6 +124,7 @@ class AIConversationService:
         content: str,
         correlation_id: str,
         request_id: str | None = None,
+        purpose: str | None = None,
     ) -> tuple[AIMessage, AIMessage, AIChatResult]:
         if conversation.user_id != self.user.id:
             raise ConversationNotFoundError("Conversation not found")
@@ -129,6 +143,9 @@ class AIConversationService:
         self.db.flush()
 
         context_messages = self._build_context(conversation.id, user_message)
+        system_prompt = self._purpose_prompt(purpose)
+        if system_prompt:
+            context_messages = [{"role": "system", "content": system_prompt}, *context_messages]
 
         try:
             result = self.orchestrator.run_chat(
@@ -152,6 +169,7 @@ class AIConversationService:
             credits_charged=result.credits_used_cents,
             model=result.model,
             request_id=result.response_id,
+            balance_remaining_cents=result.balance_cents,
         )
         self.db.add(assistant_message)
         self.db.flush()
@@ -180,6 +198,11 @@ class AIConversationService:
         history.append(latest_message)
         return [{"role": msg.role, "content": msg.content_text} for msg in history]
 
+    def _purpose_prompt(self, purpose: str | None) -> str | None:
+        if not purpose:
+            return None
+        return PURPOSE_PROMPTS.get(purpose)
+
     def _generate_title(self, first_message: str | None) -> str | None:
         if first_message:
             snippet = first_message.strip().splitlines()[0][:80].strip()
@@ -187,3 +210,15 @@ class AIConversationService:
                 return snippet
         return None
 
+    def delete_conversation(self, conversation_id: int) -> None:
+        conversation = self.get_conversation(conversation_id)
+        self.db.delete(conversation)
+        self.db.commit()
+
+    def rename_conversation(self, conversation_id: int, title: str | None) -> AIConversation:
+        conversation = self.get_conversation(conversation_id)
+        conversation.title = title
+        conversation.updated_at = datetime.now(timezone.utc)
+        self.db.commit()
+        self.db.refresh(conversation)
+        return conversation

@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Sequence
+from typing import Literal, Sequence
 
 from pydantic import BaseModel, Field, validator
+
+
+PurposeType = Literal["general", "cover_letter", "thank_you", "resume_tailoring"]
 
 
 class ConversationCreateRequest(BaseModel):
     title: str | None = None
     message: str | None = None
+    purpose: PurposeType | None = None
 
     @validator("title")
     def _strip_title(cls, value: str | None) -> str | None:
@@ -48,6 +52,7 @@ class MessageOut(BaseModel):
     total_tokens: int | None = None
     credits_charged: int | None = None
     model: str | None = None
+    balance_remaining_cents: int | None = None
 
 
 class ConversationDetailResponse(BaseModel):
@@ -62,6 +67,7 @@ class ConversationDetailResponse(BaseModel):
 class MessageCreateRequest(BaseModel):
     content: str = Field(..., min_length=1)
     request_id: str | None = None
+    purpose: PurposeType | None = None
 
     @validator("content")
     def _strip_content(cls, value: str) -> str:
@@ -69,6 +75,17 @@ class MessageCreateRequest(BaseModel):
         if not value:
             raise ValueError("content must not be empty")
         return value
+
+
+class ConversationUpdateRequest(BaseModel):
+    title: str | None = None
+
+    @validator("title")
+    def _normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
 
 class ConversationMessageResponse(BaseModel):

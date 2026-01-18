@@ -147,6 +147,7 @@ def test_post_message_appends_and_returns_balance(client, db_session, users, mon
     body = resp.json()
     assert body["assistant_message"]["content_text"] == "Second reply"
     assert body["credits_remaining_dollars"] == format_cents_to_dollars(body["credits_remaining_cents"])
+    assert body["assistant_message"]["balance_remaining_cents"] == body["credits_remaining_cents"]
 
 
 def test_rate_limit_enforced(client, db_session, users, monkeypatch):
@@ -180,6 +181,56 @@ def test_rate_limit_enforced(client, db_session, users, monkeypatch):
     finally:
         app_config.settings.RATE_LIMIT_ENABLED = previous_enabled
         rate_limiter_module.reset_rate_limiter()
+
+
+def test_message_insufficient_credits_shape(client, users):
+    user, _ = users
+    # user has zero credits by default
+    create = client.post("/ai/conversations", json={"title": "No credits"})
+    assert create.status_code == 201
+    conversation_id = create.json()["id"]
+
+    resp = client.post(
+        f"/ai/conversations/{conversation_id}/messages",
+        json={"content": "Need help with a cover letter."},
+    )
+
+    assert resp.status_code == 402
+    body = resp.json()
+    assert body.get("message") == "Insufficient credits."
+    assert body.get("error") == "HTTP_ERROR"
+
+
+def test_delete_conversation_removes_history(client, db_session, users):
+    user, _ = users
+    _seed_user_credits(db_session, user.id)
+
+    create = client.post("/ai/conversations", json={"title": "To delete"})
+    assert create.status_code == 201
+    conversation_id = create.json()["id"]
+
+    delete = client.delete(f"/ai/conversations/{conversation_id}")
+    assert delete.status_code == 204
+
+    # Ensure it is gone
+    get_resp = client.get(f"/ai/conversations/{conversation_id}")
+    assert get_resp.status_code == 404
+
+
+def test_rename_conversation(client, db_session, users):
+    user, _ = users
+    _seed_user_credits(db_session, user.id)
+
+    create = client.post("/ai/conversations", json={"title": "Old"})
+    conversation_id = create.json()["id"]
+
+    resp = client.patch(f"/ai/conversations/{conversation_id}", json={"title": "Renamed"})
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "Renamed"
+
+    resp = client.patch(f"/ai/conversations/{conversation_id}", json={"title": "  "})
+    assert resp.status_code == 200
+    assert resp.json()["title"] is None
 
 
 @contextmanager

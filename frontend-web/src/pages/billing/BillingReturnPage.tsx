@@ -24,9 +24,11 @@ export default function BillingReturnPage() {
   const location = useLocation();
   const status = useMemo(() => resolveStatus(location.pathname, searchParams), [location.pathname, searchParams]);
 
-useEffect(() => {
-  void credits.refresh();
-}, [credits.refresh]);
+  const { refresh } = credits;
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   const { title, body } = useMemo(() => {
     switch (status) {

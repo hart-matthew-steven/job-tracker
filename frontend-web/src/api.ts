@@ -2,6 +2,13 @@
 import type {
   ActivityMetrics,
   AddNoteIn,
+  AiConfig,
+  AiConversationCreateIn,
+  AiConversationDetail,
+  AiConversationListResponse,
+  AiConversationMessageIn,
+  AiConversationMessageResponse,
+  AiConversationUpdateIn,
   ChangePasswordIn,
   ConfirmUploadIn,
   CreateInterviewIn,
@@ -574,5 +581,71 @@ export function createStripeCheckoutSession(packKey: string): Promise<StripeChec
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pack_key: normalized }),
+  });
+}
+
+/** -------------------
+ * AI Assistant
+ * ------------------- */
+export function listAiConversations(opts: { limit?: number; offset?: number } = {}): Promise<AiConversationListResponse> {
+  const params = new URLSearchParams();
+  const limit = Math.max(1, Math.min(Number(opts.limit ?? 25) || 25, 100));
+  params.set("limit", String(limit));
+  if (typeof opts.offset === "number" && Number.isFinite(opts.offset) && opts.offset >= 0) {
+    params.set("offset", String(Math.floor(opts.offset)));
+  }
+  const qs = params.toString();
+  return requestJson<AiConversationListResponse>(`/ai/conversations${qs ? `?${qs}` : ""}`);
+}
+
+export function getAiConversation(
+  conversationId: number,
+  opts: { limit?: number; offset?: number } = {}
+): Promise<AiConversationDetail> {
+  const params = new URLSearchParams();
+  const limit = Math.max(1, Math.min(Number(opts.limit ?? 50) || 50, 100));
+  params.set("limit", String(limit));
+  if (typeof opts.offset === "number" && Number.isFinite(opts.offset) && opts.offset >= 0) {
+    params.set("offset", String(Math.floor(opts.offset)));
+  }
+  const qs = params.toString();
+  return requestJson<AiConversationDetail>(`/ai/conversations/${conversationId}${qs ? `?${qs}` : ""}`);
+}
+
+export function createAiConversation(payload: AiConversationCreateIn): Promise<AiConversationDetail> {
+  return requestJson<AiConversationDetail>(`/ai/conversations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function sendAiConversationMessage(
+  conversationId: number,
+  payload: AiConversationMessageIn
+): Promise<AiConversationMessageResponse> {
+  return requestJson<AiConversationMessageResponse>(`/ai/conversations/${conversationId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getAiConfig(): Promise<AiConfig> {
+  return requestJson<AiConfig>(`/ai/config`);
+}
+
+export function deleteAiConversation(conversationId: number): Promise<void> {
+  return requestVoid(`/ai/conversations/${conversationId}`, { method: "DELETE" });
+}
+
+export function renameAiConversation(
+  conversationId: number,
+  payload: AiConversationUpdateIn
+): Promise<AiConversationDetail> {
+  return requestJson<AiConversationDetail>(`/ai/conversations/${conversationId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
 }

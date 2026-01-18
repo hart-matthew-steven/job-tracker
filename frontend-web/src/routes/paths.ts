@@ -13,6 +13,7 @@ export const ROUTES = {
   board: "/board",
   jobs: "/jobs",
   insights: "/insights",
+  aiAssistant: "/ai-assistant",
   billing: "/billing",
   billingReturn: "/billing/return",
   billingReturnSuccessLegacy: "/billing/stripe/success",

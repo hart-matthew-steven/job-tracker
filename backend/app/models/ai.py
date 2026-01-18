@@ -24,6 +24,8 @@ class AIConversation(Base):
         cascade="all, delete-orphan",
     )
     usage_entries = relationship("AIUsage", back_populates="conversation")
+    artifacts = relationship("AIArtifact", back_populates="conversation")
+    artifact_links = relationship("AIConversationArtifact", back_populates="conversation", cascade="all, delete-orphan")
 
 
 class AIMessage(Base):
@@ -39,6 +41,7 @@ class AIMessage(Base):
     credits_charged = Column(Integer, nullable=True)
     model = Column(String(100), nullable=True)
     request_id = Column(String(255), nullable=True)
+    balance_remaining_cents = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     conversation = relationship("AIConversation", back_populates="messages")

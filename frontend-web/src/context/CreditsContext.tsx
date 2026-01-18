@@ -1,5 +1,5 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PropsWithChildren } from "react";
+import type { PropsWithChildren, ReactElement } from "react";
 
 import { getCreditsBalance } from "../api";
 import type { CreditsBalance } from "../types/api";
@@ -13,7 +13,7 @@ export type CreditsContextValue = {
 
 const CreditsContext = createContext<CreditsContextValue | null>(null);
 
-export function CreditsProvider({ children }: PropsWithChildren): JSX.Element {
+export function CreditsProvider({ children }: PropsWithChildren): ReactElement {
   const [balance, setBalance] = useState<CreditsBalance | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

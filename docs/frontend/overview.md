@@ -43,6 +43,8 @@ This document describes the frontend structure and conventions at a high level.
 
 - Each pack calls `POST /billing/stripe/checkout` with its `pack_key` and redirects to the returned Stripe URL.
 - `/billing/return` (and the legacy `/billing/stripe/success|cancelled` paths) show a success or cancel state and call `credits.refresh()` so balances stay in sync with the webhook.
+- The AI Assistant (`/ai-assistant`) consumes prepaid credits only when sending prompts. The composer now defaults to “General chat” (no template) while keeping optional presets for cover letters/thank-you/resume tailoring, and each conversation card exposes a menu (tap/click-friendly) with Rename + Delete. Rename calls `PATCH /ai/conversations/{id}`, delete calls `DELETE /ai/conversations/{id}`. The page reads the shared CreditsContext, hides the Send CTA when the balance hits zero, and surfaces a “Buy credits” pill that routes to `/billing` whenever `/ai/conversations` responds with HTTP 402. Viewing history via `GET /ai/conversations*` never spends credits; only the message POSTs subtract from the ledger. `GET /ai/config` feeds the current `AI_MAX_INPUT_CHARS` so the textarea/counter adjusts automatically when backend limits change.
+- Artifact management UI (left column) lets users pin a resume + job description per conversation. Uploads call `POST /ai/artifacts/upload-url` (with a presigned PUT), pasted text uses `POST /ai/artifacts/text`, URLs use `POST /ai/artifacts/url`, and existing artifacts can be re-pinned. The list consumes `GET /ai/artifacts/conversations/{id}` to show status (Pending/Ready/Failed), version numbers, and “View” links (presigned GETs) once the backend has extracted text.
 
 ---
 
