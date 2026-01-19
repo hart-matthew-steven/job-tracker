@@ -12,6 +12,7 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.rate_limit import require_rate_limit
 from app.dependencies.request_id import get_correlation_id
 from app.models.ai import AIConversation, AIConversationSummary, AIMessage
+from app.models.user import User
 from app.schemas.ai_conversation import (
     ConversationContextStatus,
     ConversationCreateRequest,
