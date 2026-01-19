@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # App code
 COPY . .
+RUN chmod +x scripts/run_celery_worker.sh
 
 # App Runner default
 EXPOSE 8080
