@@ -90,12 +90,26 @@ jobs:
       # -----------------------------
       # Deploy via boto3 (wait + health + rollback)
       # -----------------------------
-      - name: Deploy via boto3 (wait + health + rollback)
+      - name: Deploy API via boto3 (wait + health + rollback)
         env:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           APPRUNNER_SERVICE_ARN: ${{ secrets.APPRUNNER_SERVICE_ARN }}
           IMAGE_URI: ${{ steps.image.outputs.image_uri }}
           HEALTH_URL: ${{ secrets.BACKEND_HEALTH_URL }}
+        run: |
+          python scripts/deploy_apprunner.py \
+            --region "$AWS_REGION" \
+            --service-arn "$APPRUNNER_SERVICE_ARN" \
+            --image-uri "$IMAGE_URI" \
+            --health-url "$HEALTH_URL" \
+            --timeout-seconds 900
+
+      - name: Deploy worker via boto3 (wait + health + rollback)
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          APPRUNNER_SERVICE_ARN: ${{ secrets.APPRUNNER_WORKER_SERVICE_ARN }}
+          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+          HEALTH_URL: ${{ secrets.WORKER_HEALTH_URL }}
         run: |
           python scripts/deploy_apprunner.py \
             --region "$AWS_REGION" \

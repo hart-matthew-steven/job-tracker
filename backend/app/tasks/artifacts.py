@@ -5,15 +5,30 @@ import os
 import textwrap
 from pathlib import Path
 
-import httpx
-import pdfplumber
-from bs4 import BeautifulSoup
-from docx import Document
-from readability import Document as ReadabilityDocument
-from sqlalchemy.orm import Session
+import httpx  # type: ignore[import]
+import pdfplumber  # type: ignore[import]
+from bs4 import BeautifulSoup  # type: ignore[import]
+from docx import Document  # type: ignore[import]
+from readability import Document as ReadabilityDocument  # type: ignore[import]
+from sqlalchemy.orm import Session  # type: ignore[import]
 
 from app.celery_app import celery_app
 from app.core.database import SessionLocal
+# Ensure SQLAlchemy mappers register every relationship before Celery tasks import them.
+# These imports intentionally bring in all models so SQLAlchemy can resolve string references.
+from app.models import ai as _ai_models  # noqa: F401
+from app.models import artifact as _artifact_models  # noqa: F401
+from app.models import credit as _credit_models  # noqa: F401
+from app.models import email_verification_code as _email_verification_models  # noqa: F401
+from app.models import job_activity as _job_activity_models  # noqa: F401
+from app.models import job_application as _job_application_models  # noqa: F401
+from app.models import job_application_note as _job_application_note_models  # noqa: F401
+from app.models import job_application_tag as _job_application_tag_models  # noqa: F401
+from app.models import job_document as _job_document_models  # noqa: F401
+from app.models import job_interview as _job_interview_models  # noqa: F401
+from app.models import saved_view as _saved_view_models  # noqa: F401
+from app.models import stripe_event as _stripe_event_models  # noqa: F401
+from app.models import user as _user_model  # noqa: F401
 from app.models.artifact import AIArtifact, ArtifactStatus
 from app.services import artifact_storage
 
