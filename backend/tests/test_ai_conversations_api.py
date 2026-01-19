@@ -107,6 +107,10 @@ def test_create_conversation_without_message(client, db_session, users, monkeypa
     body = resp.json()
     assert body["title"] == "My Chat"
     assert body["messages"] == []
+    assert body["latest_summary"] is None
+    ctx = body["context_status"]
+    assert ctx["token_budget"] == app_config.settings.AI_CONTEXT_TOKEN_BUDGET
+    assert ctx["tokens_used"] >= 0
 
 
 def test_create_conversation_with_initial_message(client, db_session, users, monkeypatch):
@@ -126,6 +130,7 @@ def test_create_conversation_with_initial_message(client, db_session, users, mon
     assert data["messages"][0]["role"] == "user"
     assert data["messages"][1]["role"] == "assistant"
     assert data["messages"][1]["content_text"] == "Assist reply"
+    assert data["context_status"]["token_budget"] == app_config.settings.AI_CONTEXT_TOKEN_BUDGET
 
 
 def test_post_message_appends_and_returns_balance(client, db_session, users, monkeypatch):
@@ -198,6 +203,66 @@ def test_message_insufficient_credits_shape(client, users):
     body = resp.json()
     assert body.get("message") == "Insufficient credits."
     assert body.get("error") == "HTTP_ERROR"
+
+
+def test_summaries_generated_and_context_meter(client, db_session, users, monkeypatch):
+    user, _ = users
+    _seed_user_credits(db_session, user.id)
+
+    original_message_threshold = app_config.settings.AI_SUMMARY_MESSAGE_THRESHOLD
+    original_token_threshold = app_config.settings.AI_SUMMARY_TOKEN_THRESHOLD
+    original_chunk_size = app_config.settings.AI_SUMMARY_CHUNK_SIZE
+    original_budget = app_config.settings.AI_CONTEXT_TOKEN_BUDGET
+    app_config.settings.AI_SUMMARY_MESSAGE_THRESHOLD = 2
+    app_config.settings.AI_SUMMARY_TOKEN_THRESHOLD = 0
+    app_config.settings.AI_SUMMARY_CHUNK_SIZE = 2
+    app_config.settings.AI_CONTEXT_TOKEN_BUDGET = 100
+    summary_calls = {"count": 0}
+
+    def fake_summary(self, *, previous_summary, new_messages):
+        summary_calls["count"] += 1
+        return "Summary chunk", OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+
+    monkeypatch.setattr("app.services.ai_conversation.ConversationSummarizer.summarize", fake_summary)
+
+    captured_payloads = []
+    fake_response = OpenAIChatResponse(
+        request_id="req-static",
+        response_id="resp-static",
+        model=app_config.settings.OPENAI_MODEL,
+        message="OK",
+        usage=OpenAIUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150),
+    )
+
+    def fake_chat(self, *, messages, request_id: str, max_tokens: int | None = None):
+        captured_payloads.append(messages)
+        return fake_response
+
+    monkeypatch.setattr("app.services.openai_client.OpenAIClient.chat_completion", fake_chat)
+
+    try:
+        with override_concurrency_limit():
+            create = client.post("/ai/conversations", json={"message": "hello"})
+            conversation_id = create.json()["id"]
+            client.post(f"/ai/conversations/{conversation_id}/messages", json={"content": "second"})
+            # send third message to ensure summary is used in context
+            client.post(f"/ai/conversations/{conversation_id}/messages", json={"content": "third"})
+    finally:
+        app_config.settings.AI_SUMMARY_MESSAGE_THRESHOLD = original_message_threshold
+        app_config.settings.AI_SUMMARY_TOKEN_THRESHOLD = original_token_threshold
+        app_config.settings.AI_SUMMARY_CHUNK_SIZE = original_chunk_size
+        app_config.settings.AI_CONTEXT_TOKEN_BUDGET = original_budget
+
+    assert summary_calls["count"] >= 1
+    detail = client.get(f"/ai/conversations/{conversation_id}").json()
+    assert detail["latest_summary"]["summary_text"] == "Summary chunk"
+    assert detail["context_status"]["last_summarized_at"] is not None
+    # Ensure summary message is injected into the latest OpenAI payload
+    last_call_messages = captured_payloads[-1]
+    assert any(
+        msg["role"] == "system" and "Conversation summary" in msg["content"]
+        for msg in last_call_messages
+    )
 
 
 def test_delete_conversation_removes_history(client, db_session, users):

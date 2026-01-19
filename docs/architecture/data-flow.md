@@ -236,6 +236,10 @@ Key behaviors:
    - Any OpenAI exception triggers `refund_reservation` and HTTP 503 so the client can retry.
 5. Successful runs persist the assistant message (`ai_messages`), update `ai_usage` with `conversation_id`/`message_id`/`response_id`, bump `ai_conversations.updated_at`, and return `{ user_message, assistant_message, credits_used_cents, credits_remaining_* }`.
 6. `GET /ai/conversations`/`GET /ai/conversations/{id}` page through `ai_conversations` + `ai_messages` (oldest-first). The frontend does not need to resend the entire transcript; it can resume from the last known message id.
+7. Conversation summaries + context meter:
+   - After each send, `_after_message_sent` checks whether the thread has crossed `AI_SUMMARY_MESSAGE_THRESHOLD` or `AI_SUMMARY_TOKEN_THRESHOLD`. If so, the newest unsummarized messages (capped by `AI_SUMMARY_CHUNK_SIZE`) are passed to `ConversationSummarizer`, which calls OpenAI (using `AI_SUMMARY_MODEL` when provided, otherwise the default chat model) with a “running summary” prompt and stores the result in `ai_conversation_summaries`.
+   - `_build_context` prepends the latest summary as a synthetic system message (`Conversation summary (up to message #N): ...`) before the trimmed transcript, so OpenAI sees the entire arc without us resending hundreds of turns.
+   - `GET /ai/conversations/{id}` now bundles `context_status` (`token_budget=AI_CONTEXT_TOKEN_BUDGET`, `tokens_used`, `tokens_remaining`, `percent_used`, `last_summarized_at`) plus `latest_summary` so the frontend can display a Cursor-style context meter and “last summarized” indicator with no extra requests. All thresholds and limits are exposed via `AI_SUMMARY_MAX_TOKENS`, `AI_SUMMARY_CHUNK_SIZE`, etc.
 
 ### Rate limiting (DynamoDB)
 

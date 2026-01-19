@@ -2,6 +2,9 @@
 # Tasks
 
 ## In Progress
+- Phase 2B: Artifact history + diff surfacing
+  - Backend endpoints (`/ai/artifacts/.../history`, `/ai/artifacts/{id}/diff`) plus tests/docs are merged.
+  - Next: expose the picker/diff UI in the assistant and add regression tests once the frontend lands.
 - Phase 7: CI quality gate (block merges when checks fail):
   - GitHub Actions workflows added
   - Branch protection (required checks) needs to be enabled in GitHub UI
@@ -86,6 +89,10 @@
   - Hide jobs after N days (UI-only hiding; data stays in DB)
 
 ## Completed
+- Phase 2A: Conversation summaries + context meter
+  - `ai_conversation_summaries` table + migrations shipped; summaries auto-generate once token/message thresholds are hit and are injected into future prompts.
+  - `GET /ai/conversations/{id}` now returns `context_status` (token budget/usage/percent + last summary timestamp) and `latest_summary`.
+  - New env knobs documented: `AI_CONTEXT_TOKEN_BUDGET`, `AI_SUMMARY_MESSAGE_THRESHOLD`, `AI_SUMMARY_TOKEN_THRESHOLD`, `AI_SUMMARY_MAX_TOKENS`, `AI_SUMMARY_CHUNK_SIZE`, `AI_SUMMARY_MODEL`.
 - DynamoDB rate limiter:
   - Replaced the SlowAPI decorators with `require_rate_limit(...)` backed by `jobapptracker-rate-limits` (PK `pk=user:{id}|ip:{addr}`, SK `route:{key}:window:{seconds}`, TTL `expires_at`).
   - Added env knobs `RATE_LIMIT_ENABLED`, `DDB_RATE_LIMIT_TABLE`, `RATE_LIMIT_DEFAULT_WINDOW_SECONDS`, `RATE_LIMIT_DEFAULT_MAX_REQUESTS`, `AI_RATE_LIMIT_WINDOW_SECONDS`, `AI_RATE_LIMIT_MAX_REQUESTS`.

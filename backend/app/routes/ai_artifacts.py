@@ -8,17 +8,23 @@ from app.core.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.schemas.ai_artifact import (
+    ArtifactDiffResponse,
+    ArtifactDiffLine,
     ArtifactFinalizeResponse,
+    ArtifactHistoryEntry,
+    ArtifactHistoryResponse,
     ArtifactPinRequest,
     ArtifactTextRequest,
     ArtifactStatus,
+    ArtifactType,
     ArtifactUploadRequest,
     ArtifactUploadResponse,
     ArtifactUrlRequest,
+    ConversationArtifactSummary,
     ConversationArtifactsResponse,
 )
+from app.services import artifact_storage
 from app.services.artifacts import ArtifactNotFoundError, ArtifactService
-from app.services.artifact_storage import presign_view
 
 
 router = APIRouter(prefix="/ai/artifacts", tags=["ai"])
@@ -126,22 +132,77 @@ def list_conversation_artifacts(
     except ArtifactNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Conversation not found") from None
 
-    artifacts = []
+    artifacts: list[ConversationArtifactSummary] = []
     for link in links:
         artifact = link.artifact
+        if not artifact:
+            continue
         view_url = None
         if artifact.s3_key and artifact.status == ArtifactStatus.ready and settings.AI_ARTIFACTS_BUCKET:
-            view_url = presign_view(artifact.s3_key)
+            view_url = artifact_storage.presign_view(artifact.s3_key)
         artifacts.append(
-            {
-                "artifact_id": artifact.id,
-                "artifact_type": artifact.artifact_type.value,
-                "version_number": artifact.version_number,
-                "status": artifact.status.value,
-                "source_type": artifact.source_type.value,
-                "created_at": artifact.created_at.isoformat(),
-                "failure_reason": artifact.failure_reason,
-                "view_url": view_url,
-            }
+            ConversationArtifactSummary(
+                role=link.role,
+                artifact_id=artifact.id,
+                artifact_type=artifact.artifact_type,
+                version_number=artifact.version_number,
+                status=artifact.status,
+                source_type=artifact.source_type,
+                created_at=artifact.created_at,
+                pinned_at=link.pinned_at,
+                failure_reason=artifact.failure_reason,
+                view_url=view_url,
+            )
         )
     return ConversationArtifactsResponse(artifacts=artifacts)
+
+
+@router.get("/conversations/{conversation_id}/history", response_model=ArtifactHistoryResponse)
+def get_artifact_history(
+    conversation_id: int,
+    role: ArtifactType,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ArtifactHistoryResponse:
+    service = _service(db, user)
+    try:
+        versions = service.list_role_history(conversation_id, role)
+    except ArtifactNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Conversation not found") from None
+    entries = [
+        ArtifactHistoryEntry(
+            artifact_id=artifact.id,
+            role=artifact.artifact_type,
+            version_number=artifact.version_number,
+            status=artifact.status,
+            source_type=artifact.source_type,
+            created_at=artifact.created_at,
+            pinned_at=None,
+            failure_reason=artifact.failure_reason,
+        )
+        for artifact in versions
+    ]
+    return ArtifactHistoryResponse(artifacts=entries)
+
+
+@router.get("/{artifact_id}/diff", response_model=ArtifactDiffResponse)
+def get_artifact_diff(
+    artifact_id: int,
+    compare_to_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ArtifactDiffResponse:
+    service = _service(db, user)
+    try:
+        base, other, diff = service.get_artifact_diff(artifact_id, compare_to_id)
+    except ArtifactNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Artifact not found") from None
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return ArtifactDiffResponse(
+        artifact_id=base.id,
+        compare_to_id=other.id,
+        artifact_version=base.version_number,
+        compare_version=other.version_number,
+        diff=[ArtifactDiffLine(op=op, text=text) for op, text in diff],
+    )

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -56,16 +58,46 @@ class ArtifactPinRequest(BaseModel):
     conversation_id: int
 
 
-class ArtifactVersion(BaseModel):
+class ConversationArtifactSummary(BaseModel):
+    role: ArtifactType
     artifact_id: int
     artifact_type: ArtifactType
     version_number: int
     status: ArtifactStatus
     source_type: ArtifactSourceType
-    created_at: str
+    created_at: datetime
+    pinned_at: datetime
     failure_reason: str | None = None
     view_url: str | None = None
 
 
 class ConversationArtifactsResponse(BaseModel):
-    artifacts: list[ArtifactVersion]
+    artifacts: list[ConversationArtifactSummary]
+
+
+class ArtifactHistoryEntry(BaseModel):
+    artifact_id: int
+    role: ArtifactType
+    version_number: int
+    status: ArtifactStatus
+    source_type: ArtifactSourceType
+    created_at: datetime
+    pinned_at: datetime | None = None
+    failure_reason: str | None = None
+
+
+class ArtifactHistoryResponse(BaseModel):
+    artifacts: list[ArtifactHistoryEntry]
+
+
+class ArtifactDiffLine(BaseModel):
+    op: Literal["equal", "insert", "delete", "replace"]
+    text: str
+
+
+class ArtifactDiffResponse(BaseModel):
+    artifact_id: int
+    compare_to_id: int
+    artifact_version: int
+    compare_version: int
+    diff: list[ArtifactDiffLine]

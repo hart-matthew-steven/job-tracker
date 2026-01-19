@@ -55,6 +55,20 @@ class MessageOut(BaseModel):
     balance_remaining_cents: int | None = None
 
 
+class ConversationContextStatus(BaseModel):
+    token_budget: int
+    tokens_used: int
+    tokens_remaining: int
+    percent_used: float
+    last_summarized_at: datetime | None = None
+
+
+class LatestConversationSummary(BaseModel):
+    id: int
+    summary_text: str
+    created_at: datetime
+
+
 class ConversationDetailResponse(BaseModel):
     id: int
     title: str | None
@@ -62,6 +76,8 @@ class ConversationDetailResponse(BaseModel):
     updated_at: datetime
     messages: list[MessageOut]
     next_offset: int | None = None
+    context_status: ConversationContextStatus
+    latest_summary: LatestConversationSummary | None = None
 
 
 class MessageCreateRequest(BaseModel):

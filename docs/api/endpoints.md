@@ -202,7 +202,7 @@ Guidelines:
 
 - `GET /ai/conversations/{conversation_id}?limit=50&offset=0`
   - Auth: Bearer
-  - Response: `ConversationDetailResponse` including paged messages (oldest-first).
+  - Response: `ConversationDetailResponse` including paged messages (oldest-first), `context_status` (`token_budget`, `tokens_used`, `tokens_remaining`, `percent_used`, `last_summarized_at`), and `latest_summary` (id/text/timestamp) when the backend has generated a summary chunk.
   - Notes: Rejects access to conversations owned by another user.
 
 - `POST /ai/conversations/{conversation_id}/messages`
@@ -255,8 +255,36 @@ Guidelines:
 
 - `GET /ai/artifacts/conversations/{conversation_id}`
   - Auth: Bearer
-  - Response: `{ "artifacts": [ { "artifact_id": 45, "artifact_type": "resume", "version_number": 3, "status": "ready", "source_type": "upload", "created_at": "...", "failure_reason": null, "view_url": "https://..." }, ... ] }`
-  - Notes: Returns the currently pinned artifacts (resume, job description, notes) along with their version history metadata and an optional presigned GET URL if the artifact has a binary backing file.
+  - Response:
+    ```json
+    {
+      "artifacts": [
+        {
+          "role": "resume",
+          "artifact_id": 45,
+          "artifact_type": "resume",
+          "version_number": 3,
+          "status": "ready",
+          "source_type": "upload",
+          "created_at": "2026-01-18T23:53:47.622900+00:00",
+          "pinned_at": "2026-01-18T23:53:47.622900+00:00",
+          "failure_reason": null,
+          "view_url": "https://..."
+        }
+      ]
+    }
+    ```
+  - Notes: Returns one entry per role (resume, job_description, note) showing the currently pinned artifact, its version, state, and a presigned GET URL when the artifact has a downloadable file. `status` reflects background processing (`pending`, `ready`, `failed`) so the UI can surface progress/errors.
+
+- `GET /ai/artifacts/conversations/{conversation_id}/history?role=resume`
+  - Auth: Bearer
+  - Response: `{ "artifacts": [ { "artifact_id": 45, "role": "resume", "version_number": 3, "status": "ready", ... }, ... ] }`
+  - Notes: Lists every artifact version for the specified role within the conversation (newest first). Useful for “version picker” UIs or audit views.
+
+- `GET /ai/artifacts/{artifact_id}/diff?compare_to=<optional>`
+  - Auth: Bearer
+  - Response: `{ "artifact_id": 45, "compare_to_id": 44, "artifact_version": 5, "compare_version": 4, "diff": [{ "op": "equal", "text": "Header" }, { "op": "insert", "text": "New bullet" }] }`
+  - Notes: Computes a line-level diff between the artifact and either its previous version (default) or the artifact specified via `compare_to`. Diff entries use `op` values (`equal`, `insert`, `delete`, `replace`) so the frontend can highlight changes.
 
 ---
 

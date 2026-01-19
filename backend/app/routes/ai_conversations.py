@@ -11,15 +11,16 @@ from app.core.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.rate_limit import require_rate_limit
 from app.dependencies.request_id import get_correlation_id
-from app.models.user import User
-from app.models.ai import AIConversation, AIMessage
+from app.models.ai import AIConversation, AIConversationSummary, AIMessage
 from app.schemas.ai_conversation import (
+    ConversationContextStatus,
     ConversationCreateRequest,
     ConversationDetailResponse,
     ConversationListResponse,
     ConversationMessageResponse,
     ConversationSummary,
     ConversationUpdateRequest,
+    LatestConversationSummary,
     MessageOut,
     MessageCreateRequest,
 )
@@ -99,7 +100,9 @@ def create_conversation(
         limit=min(settings.AI_MAX_CONTEXT_MESSAGES, 50),
         offset=0,
     )
-    return _serialize_conversation(conversation, messages, next_offset)
+    context_status = service.get_context_status(conversation)
+    latest_summary = service.get_latest_summary(conversation)
+    return _serialize_conversation(conversation, messages, next_offset, context_status, latest_summary)
 
 
 @router.get(
@@ -153,7 +156,9 @@ def get_conversation(
         limit=min(limit, settings.AI_MAX_CONTEXT_MESSAGES),
         offset=offset,
     )
-    return _serialize_conversation(conversation, messages, next_offset)
+    context_status = service.get_context_status(conversation)
+    latest_summary = service.get_latest_summary(conversation)
+    return _serialize_conversation(conversation, messages, next_offset, context_status, latest_summary)
 
 
 @router.post(
@@ -211,6 +216,8 @@ def _serialize_conversation(
     conversation: AIConversation,
     messages: Sequence[AIMessage],
     next_offset: int | None,
+    context_status: dict,
+    latest_summary: AIConversationSummary | None,
 ) -> ConversationDetailResponse:
     return ConversationDetailResponse(
         id=conversation.id,
@@ -219,6 +226,8 @@ def _serialize_conversation(
         updated_at=conversation.updated_at,
         messages=[_message_to_schema(m) for m in messages],
         next_offset=next_offset,
+        context_status=_context_status_to_schema(context_status),
+        latest_summary=_summary_to_schema(latest_summary),
     )
 
 
@@ -234,6 +243,26 @@ def _message_to_schema(message: AIMessage) -> MessageOut:
         credits_charged=message.credits_charged,
         model=message.model,
         balance_remaining_cents=message.balance_remaining_cents,
+    )
+
+
+def _context_status_to_schema(status: dict) -> ConversationContextStatus:
+    return ConversationContextStatus(
+        token_budget=status["token_budget"],
+        tokens_used=status["tokens_used"],
+        tokens_remaining=status["tokens_remaining"],
+        percent_used=status["percent_used"],
+        last_summarized_at=status.get("last_summarized_at"),
+    )
+
+
+def _summary_to_schema(summary: AIConversationSummary | None) -> LatestConversationSummary | None:
+    if not summary:
+        return None
+    return LatestConversationSummary(
+        id=summary.id,
+        summary_text=summary.summary_text,
+        created_at=summary.created_at,
     )
 
 
@@ -277,4 +306,6 @@ def update_conversation(
         limit=min(settings.AI_MAX_CONTEXT_MESSAGES, 50),
         offset=0,
     )
-    return _serialize_conversation(conversation, messages, next_offset)
+    context_status = service.get_context_status(conversation)
+    latest_summary = service.get_latest_summary(conversation)
+    return _serialize_conversation(conversation, messages, next_offset, context_status, latest_summary)

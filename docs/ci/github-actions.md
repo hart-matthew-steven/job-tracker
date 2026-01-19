@@ -51,9 +51,10 @@ Two additional workflows run on pushes to `main` to deploy the latest code:
 
 - **Backend deploy** — `.github/workflows/backend-deploy.yml`
   - Builds the backend image with `docker buildx --platform linux/amd64`
-  - Pushes to ECR
+  - Pushes to ECR (single image used by both the FastAPI API and the Celery worker)
   - Assumes the App Runner deploy role via GitHub OIDC (`AWS_ROLE_ARN_BACKEND_DEPLOY`)
-  - Runs `scripts/deploy_apprunner.py` to update the App Runner service, wait for health checks, and roll back automatically on failure
+  - Runs `scripts/deploy_apprunner.py` **twice**: first for the API service, then for the Celery worker service (entrypoint `/app/scripts/run_celery_worker.sh`) so both App Runner services stay in lockstep.
+  - Each deployment waits for health, emits logs, and rolls back automatically on failure. Secrets/inputs required: API service ARN + health URL, worker service ARN + health URL.
 
 - **Frontend deploy** — `.github/workflows/frontend-deploy.yml`
   - Runs `npm ci && npm run build`

@@ -23,10 +23,10 @@ This document describes the backend structure and conventions at a high level.
 ### Hosting & deployment
 
 - Production backend runs on **AWS App Runner** behind `https://api.jobapptracker.dev`.
-- Environment variables (JWT secret, database credentials, email/GuardDuty toggles, etc.) are sourced from **AWS Secrets Manager** and injected into the App Runner service—no secrets live in the repo.
+- Environment variables (JWT secret, database credentials, email/GuardDuty toggles, AI config, etc.) are sourced from a single **AWS Secrets Manager** JSON bundle referenced by `SETTINGS_BUNDLE_SECRET_ARN`. The backend loads `.env`, fetches the bundle, hydrates `os.environ`, and then instantiates the normal settings object, so App Runner only needs one env var while local dev can reuse the exact same secret ARN.
 - Container images are built locally or via CI and pushed to Amazon ECR. Always use `docker buildx build --platform linux/amd64` so the artifact matches App Runner’s runtime; images that run on Apple Silicon without the flag will fail to boot in App Runner.
 - After pushing `ACCOUNT_ID.dkr.ecr.<region>.amazonaws.com/<repo_name>:<tag>`, update the App Runner service to pull the new tag; App Runner handles rolling deployment and health checks.
-- **CI/CD:** `.github/workflows/backend-deploy.yml` runs on pushes to `main`, assumes an AWS role via GitHub OIDC, builds/pushes the image, and executes `scripts/deploy_apprunner.py` to update App Runner, poll for health, and roll back automatically if a deployment fails. Manual runs are available through `workflow_dispatch`.
+- **CI/CD:** `.github/workflows/backend-deploy.yml` runs on pushes to `main`, assumes an AWS role via GitHub OIDC, builds/pushes the image, and executes `scripts/deploy_apprunner.py` twice (API service first, Celery worker second) to keep both App Runner services on the same tag. Each deployment waits for health and rolls back automatically if a deployment fails. Manual runs are available through `workflow_dispatch`.
 
 ### Password policy
 

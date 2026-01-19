@@ -13,7 +13,7 @@ It extracts `document_id` from the S3 key format:
 Do **not** commit secrets to git.
 
 - `BACKEND_BASE_URL`: e.g. `https://api.example.com`
-- `DOC_SCAN_SHARED_SECRET_ARN`: ARN of the Secrets Manager secret that stores the shared secret value (this function retrieves the secret at runtime)
+- `SETTINGS_BUNDLE_SECRET_ARN`: ARN of the shared Secrets Manager JSON bundle. The Lambda expects this JSON blob to include a `DOC_SCAN_SHARED_SECRET` key; it loads the bundle once per cold start and reads the shared secret from that key before calling the FastAPI callback. Keeping the scan secret in the same bundle as the backend/App Runner services ensures both sides stay in sync without proliferating new env vars.
 
 ## Result mapping
 
@@ -35,7 +35,7 @@ This Lambda:
 
 Required IAM permissions (scope as tightly as possible):
 - `s3:GetObjectTagging` on `arn:aws:s3:::job-tracker-documents-0407/job-tracker/*`
-- `secretsmanager:GetSecretValue` on the `DOC_SCAN_SHARED_SECRET_ARN`
+- `secretsmanager:GetSecretValue` on the `SETTINGS_BUNDLE_SECRET_ARN`
 
 ## Build + push to ECR (example)
 

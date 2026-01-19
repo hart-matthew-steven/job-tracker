@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Iterable, Sequence
 
@@ -7,12 +8,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.ai import AIConversation, AIMessage
+from app.models.ai import AIConversation, AIConversationSummary, AIMessage
 from app.models.credit import AIUsage
 from app.models.user import User
 from app.services.ai_usage import AIChatResult, AIUsageOrchestrator
 from app.services.credits import InsufficientCreditsError
-from app.services.openai_client import ChatMessage
+from app.services.openai_client import ChatMessage, OpenAIClient, OpenAIClientError, OpenAIUsage
 
 PURPOSE_PROMPTS = {
     "cover_letter": (
@@ -26,6 +27,49 @@ PURPOSE_PROMPTS = {
     ),
 }
 
+logger = logging.getLogger(__name__)
+
+SUMMARY_SYSTEM_PROMPT = (
+    "You maintain a concise running summary of a job-search coaching conversation. "
+    "Capture key facts, decisions, and follow-ups so the assistant remembers prior context. "
+    "Keep it objective, under 200 words, and omit chit-chat."
+)
+
+
+class ConversationSummarizer:
+    def __init__(self, *, client: OpenAIClient | None = None) -> None:
+        model = settings.AI_SUMMARY_MODEL or settings.OPENAI_MODEL
+        self._client = client or OpenAIClient(model=model)
+
+    def summarize(
+        self,
+        *,
+        previous_summary: str | None,
+        new_messages: Sequence[AIMessage],
+    ) -> tuple[str, OpenAIUsage]:
+        if not new_messages:
+            raise ValueError("new_messages must not be empty")
+        transcript_lines = []
+        for message in new_messages:
+            label = "User" if message.role == "user" else "Assistant"
+            transcript_lines.append(f"{label}: {message.content_text}")
+        transcript = "\n".join(transcript_lines)
+        instructions = []
+        if previous_summary:
+            instructions.append(f"Existing summary:\n{previous_summary.strip()}")
+        instructions.append("Recent messages:\n" + transcript)
+        prompt = "\n\n".join(instructions) + "\n\nUpdate the summary."
+        response = self._client.chat_completion(
+            messages=[
+                {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            request_id=f"summary-{new_messages[-1].id}",
+            max_tokens=settings.AI_SUMMARY_MAX_TOKENS,
+        )
+        summary_text = response.message.strip() or "Summary unavailable."
+        return summary_text, response.usage
+
 
 class ConversationNotFoundError(Exception):
     pass
@@ -38,10 +82,17 @@ class AIConversationService:
         user: User,
         *,
         orchestrator: AIUsageOrchestrator | None = None,
+        summarizer: ConversationSummarizer | None = None,
     ) -> None:
         self.db = db
         self.user = user
         self.orchestrator = orchestrator or AIUsageOrchestrator(db)
+        if summarizer is not None:
+            self.summarizer = summarizer
+        elif settings.AI_SUMMARY_MESSAGE_THRESHOLD > 0 or settings.AI_SUMMARY_TOKEN_THRESHOLD > 0:
+            self.summarizer = ConversationSummarizer()
+        else:
+            self.summarizer = None
 
     def create_conversation(
         self,
@@ -183,6 +234,7 @@ class AIConversationService:
 
         conversation.updated_at = datetime.now(timezone.utc)
         self.db.commit()
+        self._after_message_sent(conversation.id)
 
         return user_message, assistant_message, result
 
@@ -196,7 +248,17 @@ class AIConversationService:
         )
         history = list(reversed(rows))
         history.append(latest_message)
-        return [{"role": msg.role, "content": msg.content_text} for msg in history]
+        context = [{"role": msg.role, "content": msg.content_text} for msg in history]
+        summary = self._latest_summary_for_conversation_id(conversation_id)
+        if summary:
+            context.insert(
+                0,
+                {
+                    "role": "system",
+                    "content": f"Conversation summary (up to message #{summary.covering_message_id or 0}):\\n{summary.summary_text}",
+                },
+            )
+        return context
 
     def _purpose_prompt(self, purpose: str | None) -> str | None:
         if not purpose:
@@ -222,3 +284,100 @@ class AIConversationService:
         self.db.commit()
         self.db.refresh(conversation)
         return conversation
+
+    def get_context_status(self, conversation: AIConversation) -> dict:
+        tokens_used = self._total_estimated_tokens(conversation.id)
+        budget = max(1, settings.AI_CONTEXT_TOKEN_BUDGET)
+        remaining = max(0, budget - tokens_used)
+        percent = min(1.0, tokens_used / budget)
+        latest_summary = self._latest_summary_object(conversation)
+        return {
+            "token_budget": budget,
+            "tokens_used": tokens_used,
+            "tokens_remaining": remaining,
+            "percent_used": round(percent, 4),
+            "last_summarized_at": latest_summary.created_at if latest_summary else None,
+        }
+
+    def get_latest_summary(self, conversation: AIConversation) -> AIConversationSummary | None:
+        return self._latest_summary_object(conversation)
+
+    def _after_message_sent(self, conversation_id: int) -> None:
+        try:
+            conversation = self.db.get(AIConversation, conversation_id)
+            if not conversation:
+                return
+            self._maybe_generate_summary(conversation)
+        except Exception:  # pragma: no cover - defensive logging
+            logger.exception("Conversation post-send tasks failed", extra={"conversation_id": conversation_id})
+
+    def _maybe_generate_summary(self, conversation: AIConversation) -> None:
+        if not self.summarizer:
+            return
+        if (
+            settings.AI_SUMMARY_MESSAGE_THRESHOLD <= 0
+            and settings.AI_SUMMARY_TOKEN_THRESHOLD <= 0
+        ):
+            return
+        messages = self._conversation_messages(conversation.id)
+        if settings.AI_SUMMARY_MESSAGE_THRESHOLD > 0 and len(messages) < settings.AI_SUMMARY_MESSAGE_THRESHOLD:
+            return
+        total_tokens = sum(self._estimate_tokens(m) for m in messages)
+        if settings.AI_SUMMARY_TOKEN_THRESHOLD > 0 and total_tokens < settings.AI_SUMMARY_TOKEN_THRESHOLD:
+            return
+        latest_summary = self._latest_summary_object(conversation)
+        last_covering_id = latest_summary.covering_message_id if latest_summary else 0
+        unsummarized = [m for m in messages if not last_covering_id or m.id > last_covering_id]
+        if not unsummarized:
+            return
+        chunk = unsummarized[: settings.AI_SUMMARY_CHUNK_SIZE]
+        try:
+            summary_text, usage = self.summarizer.summarize(
+                previous_summary=latest_summary.summary_text if latest_summary else None,
+                new_messages=chunk,
+            )
+        except OpenAIClientError:
+            logger.warning("OpenAI summarization failed for conversation %s", conversation.id, exc_info=True)
+            return
+        summary = AIConversationSummary(
+            conversation_id=conversation.id,
+            summary_text=summary_text,
+            covering_message_id=chunk[-1].id,
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+        )
+        self.db.add(summary)
+        self.db.commit()
+        self.db.refresh(conversation)
+
+    def _conversation_messages(self, conversation_id: int) -> list[AIMessage]:
+        return (
+            self.db.query(AIMessage)
+            .filter(AIMessage.conversation_id == conversation_id)
+            .order_by(AIMessage.id)
+            .all()
+        )
+
+    def _estimate_tokens(self, message: AIMessage) -> int:
+        if message.total_tokens:
+            return message.total_tokens
+        if message.prompt_tokens or message.completion_tokens:
+            return (message.prompt_tokens or 0) + (message.completion_tokens or 0)
+        return max(1, len(message.content_text) // 4)
+
+    def _total_estimated_tokens(self, conversation_id: int) -> int:
+        return sum(self._estimate_tokens(m) for m in self._conversation_messages(conversation_id))
+
+    def _latest_summary_for_conversation_id(self, conversation_id: int) -> AIConversationSummary | None:
+        return (
+            self.db.query(AIConversationSummary)
+            .filter(AIConversationSummary.conversation_id == conversation_id)
+            .order_by(AIConversationSummary.created_at.desc())
+            .first()
+        )
+
+    def _latest_summary_object(self, conversation: AIConversation) -> AIConversationSummary | None:
+        if conversation.summaries:
+            return conversation.summaries[-1]
+        return self._latest_summary_for_conversation_id(conversation.id)
