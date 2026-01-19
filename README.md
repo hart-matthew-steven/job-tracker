@@ -181,6 +181,20 @@ docker buildx build \
 
 After the image is pushed, point the App Runner service at the new ECR tag (or update the service via IaC/console). App Runner pulls the image, injects environment variables from Secrets Manager, and exposes the service at the subdomain above.
 
+#### Secrets bundle (`SETTINGS_BUNDLE_SECRET_ARN`)
+
+- Instead of managing dozens of App Runner env vars manually, create a single AWS Secrets Manager entry that contains the entire `.env` payload as JSON. The backend boots by loading the secret referenced by `SETTINGS_BUNDLE_SECRET_ARN`, parsing the JSON, and hydrating `os.environ` before the regular settings code runs. This works for both the API service and the Celery worker.
+- Helper script:
+
+  ```bash
+  # Convert your .env into JSON suitable for Secrets Manager
+  python temp_scripts/env_to_json.py backend/.env > /tmp/backend-config.json
+
+  # Upload /tmp/backend-config.json as the secret value (e.g., jobtracker/prod/backend-config)
+  ```
+
+- Set `SETTINGS_BUNDLE_SECRET_ARN=arn:aws:secretsmanager:...:secret:jobtracker/prod/backend-config` in App Runner (and locally in `.env`). The JSON can include `ENV`, DB creds, API keys, etc., while keeping App Runner well under its 50-variable limit.
+
 ### Rate limiting (DynamoDB)
 
 - Request-level limits (for `/auth/cognito/*`, `/ai/*`, and document upload presigns) use the shared DynamoDB table `jobapptracker-rate-limits`.
@@ -410,6 +424,8 @@ curl -s -X POST http://localhost:8000/ai/chat \
 - Frontend entry point: `/ai-assistant` adds a primary nav item, renders the conversation list + chat thread full-screen, and uses the shared CreditsContext to disable the composer when the balance hits zero. The composer now defaults to “General chat” while keeping optional presets for cover letters / thank-you letters / resume tailoring. Each conversation card exposes an action menu (rename + delete) that works on desktop and mobile. HTTP 402 responses show a friendly banner with a “Buy credits” CTA that routes to `/billing`; `GET /ai/conversations*` history calls never spend credits.
 - Guardrails: per-user rate limiting (`AI_REQUESTS_PER_MINUTE`), concurrency limiting (`AI_MAX_CONCURRENT_REQUESTS`), context trimming (`AI_MAX_CONTEXT_MESSAGES`), max user input (`AI_MAX_INPUT_CHARS`), retry budget (`AI_OPENAI_MAX_RETRIES`), and a higher completion cap (`AI_COMPLETION_TOKENS_MAX=3000`). All are documented in `.env.example` and parsed in `app/core/config.py`.
 - Settlement logic now handles overruns safely: if actual cost exceeds the reservation we finalize the reserved amount, attempt to spend the delta via `CreditsService.spend_credits`, and refund/return HTTP 402 when the user lacks funds—no negative balances or silent absorption.
+- Context meter: `GET /ai/conversations/{id}` now returns `context_status` (tokens used vs `AI_CONTEXT_TOKEN_BUDGET`, percent full, last summarized timestamp) so the UI can display “Context 80% full” indicators similar to Cursor.
+- Summaries: once a conversation crosses `AI_SUMMARY_MESSAGE_THRESHOLD`/`AI_SUMMARY_TOKEN_THRESHOLD`, the backend generates a rolling summary (stored in `ai_conversation_summaries`) and injects it into subsequent prompts so the model retains older context. Summary tuning is controlled via `AI_SUMMARY_*` settings.
 - Example conversation loop (after seeding credits):
 
 ```bash
@@ -435,12 +451,14 @@ curl -s -X POST http://localhost:8000/ai/conversations/42/messages \
 ### AI artifacts & background processing
 
 - Resume / job-description context is managed through first-class “artifacts.” The backend exposes:
-  - `POST /ai/artifacts/upload-url` → presigned PUT for S3 + artifact placeholder
-  - `POST /ai/artifacts/{id}/complete-upload` → enqueues extraction (docx/pdf)
-  - `POST /ai/artifacts/text` → stores pasted resumes/JDs immediately
-  - `POST /ai/artifacts/url` → scrapes a JD webpage via readability + BeautifulSoup
-  - `POST /ai/artifacts/{id}/pin` → reuse an existing artifact in another conversation
-  - `GET /ai/artifacts/conversations/{id}` → current artifacts per role (resume, job_description, note) including status, version numbers, and presigned view URLs
+- `POST /ai/artifacts/upload-url` → presigned PUT for S3 + artifact placeholder
+- `POST /ai/artifacts/{id}/complete-upload` → enqueues extraction (docx/pdf)
+- `POST /ai/artifacts/text` → stores pasted resumes/JDs immediately
+- `POST /ai/artifacts/url` → scrapes a JD webpage via readability + BeautifulSoup
+- `POST /ai/artifacts/{id}/pin` → reuse an existing artifact in another conversation
+- `GET /ai/artifacts/conversations/{id}` → returns one entry per role with `{ role, artifact_id, version_number, status, source_type, created_at, pinned_at, failure_reason, view_url }`
+- `GET /ai/artifacts/conversations/{id}/history?role=resume` → returns every version for the specified role (ordered newest → oldest) so the UI can show pinned history/version numbers.
+- `GET /ai/artifacts/{artifact_id}/diff?compare_to=<optional>` → returns a structured diff between the requested artifact and the previous version (or the `compare_to` id). The backend performs a line-level diff on the stored text content and emits `{op: equal|insert|delete|replace, text}` rows for UI rendering.
 - Storage & queue configuration:
   - `AI_ARTIFACTS_BUCKET` — dedicated S3 bucket for AI uploads
   - `AI_ARTIFACTS_S3_PREFIX` — path prefix (default `users/`)
@@ -458,7 +476,8 @@ curl -s -X POST http://localhost:8000/ai/conversations/42/messages \
     ```
 
     (Set `AI_ARTIFACTS_SQS_QUEUE_URL` + AWS creds, or leave it empty to fall back to in-memory execution for smoke tests.)
-- App Runner deploys a **second service** for the worker (same image, command `celery -A app.tasks.artifacts worker --loglevel=info`). Give it the same IAM role permissions as the API (S3 read/write, SQS receive/delete).
+- App Runner deploys a **second service** for the worker (same image, command `/app/scripts/run_celery_worker.sh`). The script starts a minimal HTTP health endpoint (so App Runner’s TCP checks pass without exposing source files) and then `exec`s the Celery worker. Give the worker the same IAM role permissions as the API (S3 read/write, SQS receive/delete, Secrets Manager for the bundle ARN).
+- Smoke test: `python temp_scripts/test_artifact_upload.py --api-base-url https://api.jobapptracker.dev --token "$ACCESS_TOKEN" --file ~/Downloads/resume.pdf` creates/pins an artifact, uploads via the presigned URL, triggers background processing, and polls `GET /ai/artifacts/conversations/{id}` until it lands in `ready`/`failed`. Useful after each deploy to ensure the worker, SQS, and S3 wiring all function end-to-end.
 - Frontend artifacts panel consumes the `/ai/artifacts` endpoints to show the resume/JD currently “in context,” display processing states (Pending / Ready / Failed with reason), and offer “Upload / Paste / Link” affordances for both roles.
 
 ### CI/CD pipelines
@@ -467,7 +486,7 @@ Production deploys are now automated through GitHub Actions:
 
 - **Backend** — `.github/workflows/backend-deploy.yml`
   - Triggers on pushes to `main` that touch `backend/**`, the deploy script, or the workflow.
-  - Uses GitHub OIDC to assume `AWS_ROLE_ARN_BACKEND`, builds the Docker image with `docker build` (linux/amd64), tags/pushes to ECR, then runs `scripts/deploy_apprunner.py` to update the App Runner service, wait for health, and roll back automatically if needed.
+  - Uses GitHub OIDC to assume `AWS_ROLE_ARN_BACKEND`, builds the Docker image with `docker build` (linux/amd64), tags/pushes to ECR, then runs `scripts/deploy_apprunner.py` twice—first for the FastAPI API service, then for the Celery worker service. Set the following secrets: `APPRUNNER_SERVICE_ARN`, `BACKEND_HEALTH_URL`, `APPRUNNER_WORKER_SERVICE_ARN`, and the worker’s health URL (the worker exposes a simple 200 OK endpoint on `/`).
   - Can also be run manually via `workflow_dispatch` for hotfixes.
 - **Frontend** — `.github/workflows/frontend-deploy.yml`
   - Triggers on pushes to `main` that touch `frontend-web/**`, the deploy script, or the workflow.
@@ -512,6 +531,11 @@ Rules:
 - Scripts here are disposable by default
 - They should not be imported by production code
 - If a script becomes permanent, it should be moved into an appropriate source directory
+
+- Notable scripts:
+  - `temp_scripts/env_to_json.py` – converts `.env` files into a JSON blob suitable for storing in AWS Secrets Manager (`python temp_scripts/env_to_json.py backend/.env > /tmp/backend-config.json`).
+  - `temp_scripts/test_artifact_upload.py` – end-to-end artifact smoke test (`python temp_scripts/test_artifact_upload.py --api-base-url https://api.jobapptracker.dev --token "$ACCESS_TOKEN" --file ~/Downloads/resume.pdf`); confirms S3 upload, Celery processing, and `GET /ai/artifacts/conversations/{id}` all work in production.
+  - `temp_scripts/reset_dev_db.py` – dev-only DB reset + S3 cleanup helper.
 
 ---
 
@@ -581,6 +605,13 @@ This repo includes a generated `backend/.env.example` (**names only**, no values
 - Email verification is enforced by the app: after signup we route users to `/verify` to request/confirm a 6-digit code via Resend (`/auth/cognito/verification/send` + `/auth/cognito/verification/confirm`). If someone tries to log in before verifying, every protected API still returns `403 EMAIL_NOT_VERIFIED` and the UI redirects back to `/verify`. Once verified, the backend marks `users.is_email_verified = true` and syncs `email_verified=true` to Cognito via `AdminUpdateUserAttributes` so native clients stay in sync. Settings + flow docs live in `docs/architecture/cognito-option-b.md`.
 - Idle timeout (frontend): `VITE_IDLE_TIMEOUT_MINUTES` (optional, default 30, minimum 5) controls how long the SPA waits before logging out an inactive tab.
 - Idle timeout (frontend): `VITE_IDLE_TIMEOUT_MINUTES` (optional, default 30) controls how long the SPA waits before logging out a tab with no activity.
+
+### AI context + summarization
+
+- `AI_CONTEXT_TOKEN_BUDGET` – total tokens we aim to keep in the rolling context window; exposed via the context meter in `/ai/conversations`.
+- `AI_SUMMARY_MESSAGE_THRESHOLD`, `AI_SUMMARY_TOKEN_THRESHOLD` – trigger conditions for automatic summaries (by message count and/or token total).
+- `AI_SUMMARY_CHUNK_SIZE` – number of new messages fed into each summary update.
+- `AI_SUMMARY_MAX_TOKENS`, `AI_SUMMARY_MODEL` – OpenAI parameters for the summarizer (falls back to `OPENAI_MODEL` if unset).
 
 ## Design Principles
 

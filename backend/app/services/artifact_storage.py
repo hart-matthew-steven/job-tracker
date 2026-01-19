@@ -22,7 +22,7 @@ def _bucket() -> str:
 def build_s3_key(user_id: int, artifact_id: int, filename: str) -> str:
     safe = _SANITIZE_RE.sub("_", filename or "artifact")
     prefix = settings.AI_ARTIFACTS_S3_PREFIX.rstrip("/")
-    return f"{prefix}/users/{user_id}/artifacts/{artifact_id}/{uuid.uuid4()}_{safe}"
+    return f"{prefix}/{user_id}/artifacts/{artifact_id}/{uuid.uuid4()}_{safe}"
 
 
 def presign_upload(key: str, content_type: str | None) -> str:

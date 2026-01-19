@@ -104,6 +104,7 @@ To keep the SPA snappy on high-latency networks, some routes intentionally retur
 - `GET /jobs/{job_id}/details`: returns the job, notes, interviews, and activity slice for the drawer.
 - `GET /jobs/board`: returns an array of statuses plus board cards (with `priority`, `next_action_at`, `last_action_at`, `needs_follow_up` hints) so the Kanban can hydrate in one round trip.
 - `GET /jobs/search`: returns board cards for global search / command palette results.
+- `GET /ai/conversations/{conversation_id}`: returns the requested page of messages and augments the payload with `context_status` (token budget/usage/percent + last summary timestamp) and `latest_summary` so the UI can render a Cursor-style context meter without extra requests.
 - `POST /jobs/`: create a job from anywhere (desktop or mobile). The SPA now surfaces the Create button directly in the header on small screens, but it still calls this same endpoint behind the scenes; no additional mobile-specific API exists.
 
 - `job`: `JobApplicationOut`

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from difflib import SequenceMatcher
 from typing import Sequence
 
 from sqlalchemy import func, select
@@ -116,6 +117,37 @@ class ArtifactService:
             .all()
         )
 
+    def list_role_history(self, conversation_id: int, role: ArtifactType) -> list[AIArtifact]:
+        conversation = self._get_conversation(conversation_id)
+        return (
+            self.db.query(AIArtifact)
+            .filter(
+                AIArtifact.user_id == self.user.id,
+                AIArtifact.conversation_id == conversation.id,
+                AIArtifact.artifact_type == role,
+            )
+            .order_by(AIArtifact.version_number.desc())
+            .all()
+        )
+
+    def get_artifact_diff(
+        self,
+        artifact_id: int,
+        compare_to_id: int | None = None,
+    ) -> tuple[AIArtifact, AIArtifact, list[tuple[str, str]]]:
+        base_artifact = self._get_artifact(artifact_id)
+        compare_artifact: AIArtifact | None = None
+        if compare_to_id:
+            compare_artifact = self._get_artifact(compare_to_id)
+        elif base_artifact.previous_version_id:
+            compare_artifact = self._get_artifact(base_artifact.previous_version_id)
+        if not compare_artifact:
+            raise ValueError("No comparison artifact available.")
+        if base_artifact.text_content is None or compare_artifact.text_content is None:
+            raise ValueError("Diff unavailable because one of the artifacts is missing text content.")
+        diff = _compute_diff(compare_artifact.text_content, base_artifact.text_content)
+        return base_artifact, compare_artifact, diff
+
     def _get_artifact(self, artifact_id: int) -> AIArtifact:
         artifact = (
             self.db.query(AIArtifact)
@@ -214,3 +246,26 @@ class ArtifactService:
                 except Exception:
                     pass
             self.db.delete(artifact)
+
+
+def _compute_diff(old_text: str, new_text: str) -> list[tuple[str, str]]:
+    old_lines = old_text.splitlines()
+    new_lines = new_text.splitlines()
+    matcher = SequenceMatcher(a=old_lines, b=new_lines)
+    diff: list[tuple[str, str]] = []
+    for opcode, i1, i2, j1, j2 in matcher.get_opcodes():
+        if opcode == "equal":
+            for line in old_lines[i1:i2]:
+                diff.append(("equal", line))
+        elif opcode == "delete":
+            for line in old_lines[i1:i2]:
+                diff.append(("delete", line))
+        elif opcode == "insert":
+            for line in new_lines[j1:j2]:
+                diff.append(("insert", line))
+        elif opcode == "replace":
+            for line in old_lines[i1:i2]:
+                diff.append(("delete", line))
+            for line in new_lines[j1:j2]:
+                diff.append(("insert", line))
+    return diff

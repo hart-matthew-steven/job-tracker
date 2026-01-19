@@ -22,7 +22,7 @@ def _env(name: str) -> str:
 
 @lru_cache(maxsize=1)
 def _load_scan_secret() -> str:
-    arn = _env("DOC_SCAN_SHARED_SECRET_ARN")
+    arn = _env("SETTINGS_BUNDLE_SECRET_ARN")
     client = boto3.client("secretsmanager")
     resp = client.get_secret_value(SecretId=arn)
     secret = resp.get("SecretString")

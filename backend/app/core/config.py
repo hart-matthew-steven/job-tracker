@@ -223,6 +223,13 @@ class Settings:
         self.AI_REQUESTS_PER_MINUTE = max(1, int(os.getenv("AI_REQUESTS_PER_MINUTE", "5")))
         self.AI_MAX_CONCURRENT_REQUESTS = max(1, int(os.getenv("AI_MAX_CONCURRENT_REQUESTS", "2")))
         self.AI_OPENAI_MAX_RETRIES = max(1, int(os.getenv("AI_OPENAI_MAX_RETRIES", "3")))
+        self.AI_CONTEXT_TOKEN_BUDGET = max(1, int(os.getenv("AI_CONTEXT_TOKEN_BUDGET", "12000")))
+        self.AI_SUMMARY_MESSAGE_THRESHOLD = max(0, int(os.getenv("AI_SUMMARY_MESSAGE_THRESHOLD", "24")))
+        self.AI_SUMMARY_TOKEN_THRESHOLD = max(0, int(os.getenv("AI_SUMMARY_TOKEN_THRESHOLD", "6000")))
+        self.AI_SUMMARY_MAX_TOKENS = max(1, int(os.getenv("AI_SUMMARY_MAX_TOKENS", "300")))
+        self.AI_SUMMARY_CHUNK_SIZE = max(1, int(os.getenv("AI_SUMMARY_CHUNK_SIZE", "12")))
+        summary_model = os.getenv("AI_SUMMARY_MODEL", "").strip()
+        self.AI_SUMMARY_MODEL = summary_model or None
 
         # Final: fail fast in prod
         self._validate_prod()

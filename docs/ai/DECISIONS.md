@@ -29,6 +29,30 @@ Record decisions that affect structure or long-term direction.
   - New FastAPI dependency `require_rate_limit(...)` now guards `/ai/*`, `/auth/cognito/*`, and document presign uploads, returning HTTP 429 with `Retry-After` when limits are exceeded.
   - Tests use `botocore.stub.Stubber` to simulate `UpdateItem` success/ConditionalCheckFailed flows and ensure API routes emit 429 when the limiter fires.
 
+## 2026-01-18 — Celery worker + secret bundle
+- Decision: Deploy the AI artifact worker as a dedicated App Runner service that shares the backend image, starts a minimal health server, and then execs the Celery worker. Feed both services from a single Secrets Manager JSON bundle referenced via `SETTINGS_BUNDLE_SECRET_ARN` to stay under App Runner’s env-var limit.
+- Rationale: Artifact processing needs background workers and SQS, but App Runner still expects a health endpoint. The bundle approach keeps configuration manageable (one secret for all env vars) and consistent across API + worker.
+- Consequences:
+  - `scripts/run_celery_worker.sh` boots a tiny HTTP 200 responder (no directory listing) before launching Celery, satisfying App Runner health checks without exposing repo contents.
+  - GitHub Actions backend deploy now updates both the API service and worker service using the same image/tag. Workflow requires the worker service ARN + health URL secrets.
+  - `.env` → JSON helper (`temp_scripts/env_to_json.py`) documents how to generate the bundle, and the artifact smoke test (`temp_scripts/test_artifact_upload.py`) validates the worker/SQS/S3 pipeline after deploys.
+
+## 2026-01-19 — Artifact history & diff APIs
+- Decision: Expose version history and text diffs for conversation artifacts so future UI work can show “what changed” between resume/JD uploads.
+- Rationale: Users want GitHub-style visibility into how their resume evolves per conversation. We already keep version chains via `previous_version_id`, so we can expose the data without duplicating storage.
+- Consequences:
+  - `GET /ai/artifacts/conversations/{id}/history?role=` enumerates every pinned version (newest first).
+  - `GET /ai/artifacts/{id}/diff?compare_to=` provides a line-level diff between two versions; defaults to the previous one if `compare_to` is omitted.
+  - Schemas/docs/tests updated accordingly so frontend work can build the diff UI.
+
+## 2026-01-19 — Conversation summaries + context meter
+- Decision: Introduce `ai_conversation_summaries` to store rolling summaries after a conversation crosses configurable message/token thresholds, feed those summaries into subsequent prompts, and expose a `context_status` payload (token budget/usage/percent, last summarized timestamp) so the UI can warn when context is nearly full.
+- Rationale: Long-running chats were losing earlier resume/JD context once the message window filled up. A rolling summary plus explicit context meter keeps behavior closer to Cursor/ChatGPT and gives users visibility into how close they are to the limit.
+- Consequences:
+  - New env knobs (`AI_CONTEXT_TOKEN_BUDGET`, `AI_SUMMARY_MESSAGE_THRESHOLD`, `AI_SUMMARY_TOKEN_THRESHOLD`, `AI_SUMMARY_MAX_TOKENS`, `AI_SUMMARY_CHUNK_SIZE`, optional `AI_SUMMARY_MODEL`).
+  - `AIConversationService` now generates summaries (via OpenAI) and injects them as system messages ahead of the clipped transcript.
+  - `GET /ai/conversations/{id}` responses include `context_status` and `latest_summary`, enabling the frontend to display context meters and summary banners.
+
 ---
 
 ---

@@ -63,6 +63,9 @@ Keep it concise, factual, and employer-facing.
 - Documents:
   - Presigned S3 upload flow implemented (presign → upload to S3 → confirm). GuardDuty Malware Protection + Lambda forwarder update `scan_status` before downloads are allowed. The Lambda now reads `DOC_SCAN_SHARED_SECRET` from AWS Secrets Manager via `DOC_SCAN_SHARED_SECRET_ARN` (not plain env text) before calling `/jobs/{job_id}/documents/{document_id}/scan-result`.
 - Debug endpoints `/auth/debug/token-info` + `/auth/debug/identity` remain dev-only. Authorization across the app depends on Cognito access tokens + DB ownership checks; there is no custom JWT mode anymore.
+- Secrets are now bundled via `SETTINGS_BUNDLE_SECRET_ARN`: both App Runner services load a single Secrets Manager JSON blob (`temp_scripts/env_to_json.py` helps generate it) so we don’t burn the 50-variable limit when new config flags are added. Local dev can point to the same ARN, keeping prod/dev parity without copying dozens of values.
+- Background processing runs on a dedicated App Runner worker service (same container image, command `/app/scripts/run_celery_worker.sh`). The entrypoint starts a minimal HTTP server for App Runner’s health check (no directory listings) and then `exec`s the Celery worker that consumes from SQS. GitHub Actions deploys the API and worker sequentially via `scripts/deploy_apprunner.py`.
+- Artifact smoke test script (`temp_scripts/test_artifact_upload.py`) exercises the full upload → finalize → Celery pipeline against any environment. It uploads a real file to the presigned URL, enqueues processing, and polls `GET /ai/artifacts/conversations/{id}` until the artifact is `ready`/`failed`, making it easy to validate infra after deploys.
 - Billing:
   - `credit_ledger` (integer cents) + `stripe_events` (raw payload, `status`, `processed_at`, `error`) are the source of truth for prepaid credits.
   - `STRIPE_PRICE_MAP` configures credit packs (`pack_key:price_id:credits`). `/billing/stripe/checkout` only accepts a `pack_key` and stamps metadata (`user_id`, `pack_key`, `credits_to_grant`, `environment`) into the Checkout Session so the webhook can mint credits deterministically.
@@ -74,6 +77,7 @@ Keep it concise, factual, and employer-facing.
   - API surface: `POST /ai/conversations` (optional first message), `GET /ai/conversations`, `GET /ai/conversations/{id}`, and `POST /ai/conversations/{id}/messages`. Ownership is enforced everywhere; the message endpoint is the only way credits are deducted.
   - `AIConversationService` pulls the last `AI_MAX_CONTEXT_MESSAGES` from `ai_messages`, enforces `AI_MAX_INPUT_CHARS`, writes the new user message, calls `AIUsageOrchestrator`, persists the assistant reply, and updates `ai_usage`.
   - Purpose prompts are now part of the schema (Cover Letter / Thank You Letter / Resume Tailoring). When supplied, the service prepends a purpose-specific system instruction to the OpenAI payload without storing that text in the user transcript, so each reply stays contextual without polluting history. Assistant messages also record `balance_remaining_cents` so the UI can show the post-response balance per bubble.
+  - Conversation summaries: once a thread exceeds `AI_SUMMARY_MESSAGE_THRESHOLD` / `AI_SUMMARY_TOKEN_THRESHOLD`, the backend writes a row in `ai_conversation_summaries` by calling OpenAI with a “running summary” prompt. `GET /ai/conversations/{id}` includes `context_status` (token budget/usage/percent) plus the latest summary text, and `_build_context` now injects the summary as a system message so older context remains in play. Tunable via `AI_CONTEXT_TOKEN_BUDGET`, `AI_SUMMARY_MAX_TOKENS`, `AI_SUMMARY_CHUNK_SIZE`, and optional `AI_SUMMARY_MODEL`.
 - Guardrails: `AI_REQUESTS_PER_MINUTE`, `AI_MAX_CONCURRENT_REQUESTS`, `AI_MAX_CONTEXT_MESSAGES`, `AI_MAX_INPUT_CHARS`, `AI_COMPLETION_TOKENS_MAX`, and `AI_OPENAI_MAX_RETRIES` all live in `Settings` + `.env.example`. Concurrency still uses the in-process limiter, but request-level throttling now runs through DynamoDB (`jobapptracker-rate-limits`), keyed by `user:{id}`/`ip:{addr}` + `route:{key}:window:{seconds}` with TTL-based expiry. When actual OpenAI cost exceeds the reservation we finalize the reserved amount, attempt to spend the delta via `CreditsService.spend_credits`, and refund/return HTTP 402 if the user lacks funds—no silent absorption.
 
 ## What Is Working
@@ -114,6 +118,14 @@ Keep it concise, factual, and employer-facing.
 - Tailwind v4 note: `dark:` is configured to follow the `.dark` class via `@custom-variant` in `frontend-web/src/index.css` (not media-based).
 
 ## Recent Changes (High Signal)
+- Celery worker infra (Phase 1B):
+  - Added `SETTINGS_BUNDLE_SECRET_ARN` support so App Runner loads all config from a single Secrets Manager JSON bundle.
+  - Worker entrypoint `/app/scripts/run_celery_worker.sh` launches a tiny health server (no directory listing) and then `exec`s the Celery worker. App Runner deploy workflow now updates both the API service and worker service with each push.
+  - `temp_scripts/test_artifact_upload.py` provides an end-to-end artifact smoke test that uploads a file, calls `complete-upload`, waits for the worker to finish, and confirms `GET /ai/artifacts/conversations/{id}` shows the artifact as `ready`.
+  - Artifact API responses now include role/pinned metadata so the frontend can show which resume/JD is currently in context along with presigned view URLs when processing succeeds.
+- Artifact history + diff APIs:
+  - `GET /ai/artifacts/conversations/{id}/history?role=resume` enumerates every version of the specified role for a conversation (newest first).
+  - `GET /ai/artifacts/{id}/diff?compare_to=` returns the line-level diff between two versions (defaulting to the previous one). Powered by stored `text_content` and used for future “GitHub-style” resume comparisons.
 - DynamoDB rate limiter:
   - Replaced the old SlowAPI/in-memory toggle with a shared limiter backed by `jobapptracker-rate-limits` (PK `pk=user:{id}|ip:{addr}`, SK `route:{key}:window:{seconds}`, TTL `expires_at`).
   - Covers `/ai/*`, `/auth/cognito/*`, and document upload presigns so App Runner can scale horizontally without losing quotas. Exceeding the limit raises HTTP 429 with `Retry-After`.

@@ -3,6 +3,13 @@ from __future__ import annotations
 """
 Generate the repo-root .env.example by statically inspecting the codebase for env var usage.
 
+Even though production now loads configuration from a single JSON bundle referenced by
+SETTINGS_BUNDLE_SECRET_ARN, we keep .env.example around for two reasons:
+1. Local development can still export plain env vars without going through Secrets Manager.
+2. The JSON bundle itself needs a canonical list of keys. This script is the source of truth for
+   which variables exist, so you can run it, convert the output to JSON (e.g., via
+   temp_scripts/env_to_json.py), and store the result in Secrets Manager.
+
 This script intentionally:
 - reads source files only (no imports / execution)
 - outputs variable names only (no values)
@@ -138,6 +145,18 @@ GROUPS: list[Group] = [
             "AI_REQUESTS_PER_MINUTE",
             "AI_MAX_CONCURRENT_REQUESTS",
             "AI_OPENAI_MAX_RETRIES",
+        ),
+    ),
+    Group(
+        "AI summaries",
+        "Conversation summarization + context meter.",
+        (
+            "AI_CONTEXT_TOKEN_BUDGET",
+            "AI_SUMMARY_MESSAGE_THRESHOLD",
+            "AI_SUMMARY_TOKEN_THRESHOLD",
+            "AI_SUMMARY_MAX_TOKENS",
+            "AI_SUMMARY_CHUNK_SIZE",
+            "AI_SUMMARY_MODEL",
         ),
     ),
 ]
